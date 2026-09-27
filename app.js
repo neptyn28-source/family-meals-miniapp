@@ -630,6 +630,268 @@ async function deleteRule(id) {
   }
 }
 
+
+const MEAL_TYPES = [
+  ["breakfast", "Завтрак"],
+  ["snack1", "Перекус"],
+  ["lunch", "Обед"],
+  ["snack2", "Перекус"],
+  ["dinner", "Ужин"],
+];
+
+let currentWeekStart = getMonday(new Date());
+
+function getMonday(value) {
+  const date = new Date(value);
+  date.setHours(12, 0, 0, 0);
+  const shift = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - shift);
+  return date;
+}
+
+function addDays(value, days) {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function isoDate(value) {
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function shortDate(value) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+  }).format(new Date(value));
+}
+
+function dayTitle(value) {
+  const text = new Intl.DateTimeFormat("ru-RU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(value));
+
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function weekStatusLabel(status) {
+  const labels = {
+    draft: "Черновик",
+    approved: "Утверждено",
+    archived: "Архив",
+  };
+  return labels[status] || status;
+}
+
+async function showWeek(start = currentWeekStart) {
+  currentWeekStart = getMonday(start);
+  placeholder.classList.remove("hidden");
+
+  placeholder.innerHTML = `
+    <h2>Новая неделя</h2>
+    <p>
+      Общий план питания для семьи. Изменения сразу видны обоим.
+    </p>
+
+    <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin-bottom:10px">
+      <button id="weekPrev">←</button>
+      <button id="weekToday">Текущая неделя</button>
+      <button id="weekNext">→</button>
+    </div>
+
+    <div id="weekStatus">Загружаем…</div>
+    <div id="weekContent"></div>
+  `;
+
+  document.querySelector("#weekPrev").addEventListener("click", () => {
+    showWeek(addDays(currentWeekStart, -7));
+  });
+
+  document.querySelector("#weekNext").addEventListener("click", () => {
+    showWeek(addDays(currentWeekStart, 7));
+  });
+
+  document.querySelector("#weekToday").addEventListener("click", () => {
+    showWeek(getMonday(new Date()));
+  });
+
+  await loadWeek();
+}
+
+async function loadWeek() {
+  const status = document.querySelector("#weekStatus");
+  const content = document.querySelector("#weekContent");
+
+  if (!status || !content) return;
+
+  try {
+    status.textContent = "Загружаем неделю…";
+
+    const data = await api("week.get", {
+      week_start: isoDate(currentWeekStart),
+    });
+
+    renderWeek(data.week, data.meals || []);
+  } catch (error) {
+    status.textContent = "Ошибка: " + error.message;
+    content.innerHTML = "";
+  }
+}
+
+function renderWeek(week, meals) {
+  const status = document.querySelector("#weekStatus");
+  const content = document.querySelector("#weekContent");
+
+  const start = new Date(week.week_start + "T12:00:00");
+  const end = addDays(start, 6);
+
+  status.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin:8px 0 14px">
+      <div>
+        <strong>${shortDate(start)}–${shortDate(end)}</strong><br>
+        <small>Статус: ${escapeHtml(weekStatusLabel(week.status))}</small>
+      </div>
+
+      <button id="weekToggleStatus">
+        ${week.status === "approved" ? "Вернуть в черновик" : "Утвердить неделю"}
+      </button>
+    </div>
+  `;
+
+  document.querySelector("#weekToggleStatus").addEventListener("click", async () => {
+    const nextStatus = week.status === "approved" ? "draft" : "approved";
+
+    try {
+      await api("week.status", {
+        week_id: week.id,
+        status: nextStatus,
+      });
+      await loadWeek();
+    } catch (error) {
+      alert("Не удалось изменить статус: " + error.message);
+    }
+  });
+
+  const bySlot = new Map(
+    meals.map((meal) => [`${meal.meal_date}|${meal.meal_type}`, meal])
+  );
+
+  let html = `
+    <div style="margin-bottom:12px;padding:12px;border:1px solid #444;border-radius:12px">
+      <strong>Пока ручное заполнение</strong>
+      <div style="font-size:13px;opacity:.75;margin-top:4px">
+        Здесь проверяем хранение общей недели. Автосоставление по остаткам и правилам подключим следующим этапом.
+      </div>
+    </div>
+  `;
+
+  for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+    const date = addDays(start, dayIndex);
+    const dateIso = isoDate(date);
+
+    html += `
+      <section style="padding:14px 0;border-top:1px solid #444">
+        <h3 style="margin:0 0 10px">${escapeHtml(dayTitle(date))}</h3>
+        <div style="display:grid;gap:8px">
+    `;
+
+    for (const [mealType, mealLabel] of MEAL_TYPES) {
+      const meal = bySlot.get(`${dateIso}|${mealType}`);
+
+      html += `
+        <div style="display:grid;grid-template-columns:82px 1fr auto;gap:8px;align-items:center">
+          <div style="font-size:13px;opacity:.72">
+            ${escapeHtml(mealLabel)}
+          </div>
+
+          <div style="min-width:0">
+            ${meal
+              ? `<strong style="word-break:break-word">${escapeHtml(meal.title)}</strong>`
+              : `<span style="opacity:.55">Не заполнено</span>`
+            }
+          </div>
+
+          <div style="display:flex;gap:6px">
+            <button
+              data-meal-save="1"
+              data-week-id="${escapeHtml(week.id)}"
+              data-meal-date="${dateIso}"
+              data-meal-type="${mealType}"
+              data-meal-id="${meal ? escapeHtml(meal.id) : ""}"
+              data-meal-title="${meal ? escapeHtml(meal.title) : ""}"
+            >
+              ${meal ? "Изм." : "+"}
+            </button>
+
+            ${meal
+              ? `<button data-meal-delete="${escapeHtml(meal.id)}">×</button>`
+              : ""
+            }
+          </div>
+        </div>
+      `;
+    }
+
+    html += `
+        </div>
+      </section>
+    `;
+  }
+
+  content.innerHTML = html;
+
+  content.querySelectorAll("[data-meal-save]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const existing = button.dataset.mealTitle || "";
+      const title = prompt("Название блюда", existing);
+
+      if (title === null) return;
+
+      const trimmed = title.trim();
+
+      if (!trimmed) {
+        alert("Название блюда не может быть пустым");
+        return;
+      }
+
+      try {
+        await api("week.meal.save", {
+          week_id: button.dataset.weekId,
+          meal_date: button.dataset.mealDate,
+          meal_type: button.dataset.mealType,
+          title: trimmed,
+        });
+
+        await loadWeek();
+      } catch (error) {
+        alert("Не удалось сохранить блюдо: " + error.message);
+      }
+    });
+  });
+
+  content.querySelectorAll("[data-meal-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Удалить это блюдо из недели?")) return;
+
+      try {
+        await api("week.meal.delete", {
+          id: button.dataset.mealDelete,
+        });
+
+        await loadWeek();
+      } catch (error) {
+        alert("Не удалось удалить блюдо: " + error.message);
+      }
+    });
+  });
+}
+
 if (retryBtn) {
   retryBtn.addEventListener("click", authenticate);
 }
@@ -648,8 +910,12 @@ document.querySelectorAll(".tile").forEach((button) => {
       return;
     }
 
+    if (action === "week") {
+      await showWeek();
+      return;
+    }
+
     const names = {
-      week: "Новая неделя",
       shopping: "Покупки",
     };
 
