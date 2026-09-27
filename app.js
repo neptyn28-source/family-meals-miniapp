@@ -3,6 +3,9 @@ const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_1uec0985MtG3wzW-FaXvdw_O2P3nLoZ
 const FAMILY_API_URL =
   "https://vwapvcpodwvfzfmtoxhz.supabase.co/functions/v1/family-api";
 
+const WEEK_GENERATE_URL =
+  "https://vwapvcpodwvfzfmtoxhz.supabase.co/functions/v1/week-generate";
+
 const tg = window.Telegram?.WebApp;
 
 const statusEl = document.querySelector("#status");
@@ -744,6 +747,116 @@ async function loadWeek() {
   }
 }
 
+
+async function generateWeek(weekId) {
+  const button = document.querySelector("#weekGenerateBtn");
+  const generationStatus = document.querySelector("#weekGenerateStatus");
+
+  if (!button || !generationStatus) return;
+
+  const confirmed = confirm(
+    "Составить всю неделю автоматически?\n\n" +
+    "Уже введённые вручную блюда сохранят свои названия, а остальные слоты ИИ заполнит по остаткам и активным правилам."
+  );
+
+  if (!confirmed) return;
+
+  button.disabled = true;
+  button.textContent = "⏳ Составляем неделю…";
+  generationStatus.textContent =
+    "ИИ проверяет остатки, правила семьи, порции и двухдневные заготовки. Это может занять до минуты.";
+
+  try {
+    const response = await fetch(WEEK_GENERATE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({
+        initData,
+        week_id: weekId,
+        preserve_existing: true,
+      }),
+    });
+
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.message ||
+        data.error ||
+        `Ошибка генерации ${response.status}`
+      );
+    }
+
+    generationStatus.textContent =
+      `Готово: создано ${data.generated || 35} приёмов пищи. Загружаем меню…`;
+
+    await loadWeek();
+  } catch (error) {
+    generationStatus.textContent =
+      "Ошибка генерации: " + (error.message || "неизвестная ошибка");
+  } finally {
+    const nextButton = document.querySelector("#weekGenerateBtn");
+    if (nextButton) {
+      nextButton.disabled = false;
+      nextButton.textContent = "✨ Составить неделю";
+    }
+  }
+}
+
+function mealDetailsHtml(meal) {
+  const portions = meal?.portions || {};
+  const ingredients = Array.isArray(meal?.ingredients) ? meal.ingredients : [];
+  const recipe = meal?.recipe || {};
+  const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
+
+  const portionLines = [
+    ["Муж", portions.husband],
+    ["Жена", portions.wife],
+    ["Ребёнок", portions.child],
+  ]
+    .filter(([, value]) => value)
+    .map(([label, value]) =>
+      `<li><b>${label}:</b> ${escapeHtml(value)}</li>`
+    )
+    .join("");
+
+  const ingredientLines = ingredients
+    .map((item) => {
+      const fromHome = item.from_inventory ? " · из остатков" : "";
+      return `<li>${escapeHtml(item.name)} — ${escapeHtml(item.amount)} ${escapeHtml(item.unit)}${fromHome}</li>`;
+    })
+    .join("");
+
+  const stepLines = steps
+    .map((step) => `<li>${escapeHtml(step)}</li>`)
+    .join("");
+
+  if (!portionLines && !ingredientLines && !stepLines && !recipe.ready_output && !meal.notes) {
+    return "";
+  }
+
+  return `
+    <details style="margin-top:6px">
+      <summary style="cursor:pointer;font-size:13px;opacity:.8">Подробнее</summary>
+      <div style="padding:8px 0 4px;font-size:13px;line-height:1.45">
+        ${portionLines ? `<b>Порции</b><ul style="margin-top:4px">${portionLines}</ul>` : ""}
+        ${ingredientLines ? `<b>Ингредиенты</b><ul style="margin-top:4px">${ingredientLines}</ul>` : ""}
+        ${stepLines ? `<b>Как готовить</b><ol style="margin-top:4px">${stepLines}</ol>` : ""}
+        ${recipe.ready_output ? `<p><b>Выход:</b> ${escapeHtml(recipe.ready_output)}</p>` : ""}
+        ${meal.notes ? `<p><b>Примечание:</b> ${escapeHtml(meal.notes)}</p>` : ""}
+      </div>
+    </details>
+  `;
+}
+
 function renderWeek(week, meals) {
   const status = document.querySelector("#weekStatus");
   const content = document.querySelector("#weekContent");
@@ -752,7 +865,7 @@ function renderWeek(week, meals) {
   const end = addDays(start, 6);
 
   status.innerHTML = `
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin:8px 0 14px">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin:8px 0 10px">
       <div>
         <strong>${shortDate(start)}–${shortDate(end)}</strong><br>
         <small>Статус: ${escapeHtml(weekStatusLabel(week.status))}</small>
@@ -762,7 +875,23 @@ function renderWeek(week, meals) {
         ${week.status === "approved" ? "Вернуть в черновик" : "Утвердить неделю"}
       </button>
     </div>
+
+    <div style="padding:12px;border:1px solid #444;border-radius:12px;margin-bottom:12px">
+      <button
+        id="weekGenerateBtn"
+        style="width:100%;padding:12px;border:0;border-radius:10px;font-weight:800"
+      >
+        ✨ Составить неделю
+      </button>
+      <div id="weekGenerateStatus" style="font-size:13px;opacity:.75;margin-top:8px">
+        ИИ использует активные правила семьи и текущие остатки.
+      </div>
+    </div>
   `;
+
+  document.querySelector("#weekGenerateBtn").addEventListener("click", async () => {
+    await generateWeek(week.id);
+  });
 
   document.querySelector("#weekToggleStatus").addEventListener("click", async () => {
     const nextStatus = week.status === "approved" ? "draft" : "approved";
@@ -784,9 +913,9 @@ function renderWeek(week, meals) {
 
   let html = `
     <div style="margin-bottom:12px;padding:12px;border:1px solid #444;border-radius:12px">
-      <strong>Пока ручное заполнение</strong>
+      <strong>Общее семейное меню</strong>
       <div style="font-size:13px;opacity:.75;margin-top:4px">
-        Здесь проверяем хранение общей недели. Автосоставление по остаткам и правилам подключим следующим этапом.
+        Можно составить всю неделю автоматически, а любое блюдо потом изменить вручную.
       </div>
     </div>
   `;
@@ -812,7 +941,7 @@ function renderWeek(week, meals) {
 
           <div style="min-width:0">
             ${meal
-              ? `<strong style="word-break:break-word">${escapeHtml(meal.title)}</strong>`
+              ? `<strong style="word-break:break-word">${escapeHtml(meal.title)}</strong>${mealDetailsHtml(meal)}`
               : `<span style="opacity:.55">Не заполнено</span>`
             }
           </div>
