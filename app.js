@@ -1,3 +1,4 @@
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_1uec0985MtG3wzW-FaXvdw_O2P3nLoZ";
 const FUNCTION_URL = "https://vwapvcpodwvfzfmtoxhz.supabase.co/functions/v1/telegram-auth";
 const tg = window.Telegram?.WebApp;
 const statusEl = document.querySelector('#status');
@@ -21,7 +22,7 @@ async function authenticate(){
     return;
   }
   try {
-    const r = await fetch(FUNCTION_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData})});
+    const r = await fetch(FUNCTION_URL, {   method: 'POST',   headers: {     'Content-Type': 'application/json',     'apikey': SUPABASE_PUBLISHABLE_KEY },   body: JSON.stringify({ initData }) });
     const data = await r.json();
     if(!r.ok || !data.ok) throw new Error(data.error || 'Ошибка авторизации');
     const u=data.telegram_user;
