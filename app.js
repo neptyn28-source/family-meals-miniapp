@@ -1021,6 +1021,346 @@ function renderWeek(week, meals) {
   });
 }
 
+
+function shoppingFoodKey(name) {
+  const value = String(name ?? "")
+    .toLowerCase()
+    .replaceAll("ё", "е")
+    .replace(/[^a-zа-я0-9]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const aliases = new Map([
+    ["яйцо", "яйца"],
+    ["яйца", "яйца"],
+    ["помидор", "помидоры"],
+    ["помидоры", "помидоры"],
+    ["огурец", "огурцы"],
+    ["огурцы", "огурцы"],
+    ["груша", "груши"],
+    ["груши", "груши"],
+    ["кабачок", "кабачки"],
+    ["кабачки", "кабачки"],
+    ["тортилья", "тортильи"],
+    ["тортильи", "тортильи"],
+  ]);
+
+  return aliases.get(value) || value;
+}
+
+function foodNamesMatch(a, b) {
+  const left = shoppingFoodKey(a);
+  const right = shoppingFoodKey(b);
+
+  if (!left || !right) return false;
+  if (left === right) return true;
+
+  return (
+    left.length >= 4 &&
+    right.length >= 4 &&
+    (left.includes(right) || right.includes(left))
+  );
+}
+
+function inventoryStateMatches(ingredientState, inventoryState) {
+  if (!ingredientState || !inventoryState) return true;
+  return ingredientState === inventoryState;
+}
+
+function formatShoppingAmount(value) {
+  const number = Number(value || 0);
+  if (Math.abs(number - Math.round(number)) < 0.001) {
+    return String(Math.round(number));
+  }
+  return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function buildShoppingList(meals, inventory) {
+  const requirements = new Map();
+
+  for (const meal of meals || []) {
+    const ingredients = Array.isArray(meal.ingredients) ? meal.ingredients : [];
+
+    for (const item of ingredients) {
+      const amount = Number(item.amount);
+      if (!item?.name || !Number.isFinite(amount) || amount <= 0 || !item.unit) {
+        continue;
+      }
+
+      const key = [
+        shoppingFoodKey(item.name),
+        item.unit,
+        item.state || "",
+      ].join("|");
+
+      if (!requirements.has(key)) {
+        requirements.set(key, {
+          name: item.name,
+          amount: 0,
+          unit: item.unit,
+          state: item.state || "",
+        });
+      }
+
+      requirements.get(key).amount += amount;
+    }
+  }
+
+  const stock = (inventory || []).map((item) => ({
+    ...item,
+    remaining: Math.max(0, Number(item.quantity) || 0),
+  }));
+
+  const result = [];
+
+  for (const requirement of requirements.values()) {
+    let need = requirement.amount;
+    let covered = 0;
+
+    for (const item of stock) {
+      if (need <= 0) break;
+      if (item.remaining <= 0) continue;
+      if (item.unit !== requirement.unit) continue;
+      if (!inventoryStateMatches(requirement.state, item.state)) continue;
+      if (!foodNamesMatch(requirement.name, item.name)) continue;
+
+      const used = Math.min(need, item.remaining);
+      need -= used;
+      covered += used;
+      item.remaining -= used;
+    }
+
+    result.push({
+      ...requirement,
+      covered,
+      buy: Math.max(0, need),
+    });
+  }
+
+  return result.sort((a, b) => {
+    const aBuy = a.buy > 0 ? 0 : 1;
+    const bBuy = b.buy > 0 ? 0 : 1;
+    if (aBuy !== bBuy) return aBuy - bBuy;
+    return a.name.localeCompare(b.name, "ru");
+  });
+}
+
+function shoppingText(items, week) {
+  const start = new Date(week.week_start + "T12:00:00");
+  const end = addDays(start, 6);
+  const buy = items.filter((item) => item.buy > 0.0001);
+
+  const lines = [
+    `Покупки на ${shortDate(start)}–${shortDate(end)}`,
+    "",
+    ...buy.map(
+      (item) =>
+        `• ${item.name} — ${formatShoppingAmount(item.buy)} ${item.unit}`
+    ),
+  ];
+
+  if (!buy.length) {
+    lines.push("Покупать ничего не нужно — всё покрывается остатками.");
+  }
+
+  return lines.join("\n");
+}
+
+async function showShopping(start = currentWeekStart) {
+  currentWeekStart = getMonday(start);
+  placeholder.classList.remove("hidden");
+
+  placeholder.innerHTML = `
+    <h2>Покупки</h2>
+    <p>Список считается из меню выбранной недели и текущих остатков дома.</p>
+
+    <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;margin-bottom:10px">
+      <button id="shoppingPrev">←</button>
+      <button id="shoppingToday">Текущая неделя</button>
+      <button id="shoppingNext">→</button>
+    </div>
+
+    <div id="shoppingStatus">Считаем…</div>
+    <div id="shoppingContent"></div>
+  `;
+
+  document.querySelector("#shoppingPrev").addEventListener("click", () => {
+    showShopping(addDays(currentWeekStart, -7));
+  });
+
+  document.querySelector("#shoppingNext").addEventListener("click", () => {
+    showShopping(addDays(currentWeekStart, 7));
+  });
+
+  document.querySelector("#shoppingToday").addEventListener("click", () => {
+    showShopping(getMonday(new Date()));
+  });
+
+  await loadShopping();
+}
+
+async function loadShopping() {
+  const status = document.querySelector("#shoppingStatus");
+  const content = document.querySelector("#shoppingContent");
+
+  if (!status || !content) return;
+
+  try {
+    status.textContent = "Считаем список…";
+
+    const [weekData, inventoryData] = await Promise.all([
+      api("week.get", {
+        week_start: isoDate(currentWeekStart),
+      }),
+      api("inventory.list"),
+    ]);
+
+    renderShopping(
+      weekData.week,
+      weekData.meals || [],
+      inventoryData.items || []
+    );
+  } catch (error) {
+    status.textContent = "Ошибка: " + error.message;
+    content.innerHTML = "";
+  }
+}
+
+function renderShopping(week, meals, inventory) {
+  const status = document.querySelector("#shoppingStatus");
+  const content = document.querySelector("#shoppingContent");
+
+  const start = new Date(week.week_start + "T12:00:00");
+  const end = addDays(start, 6);
+  const items = buildShoppingList(meals, inventory);
+  const toBuy = items.filter((item) => item.buy > 0.0001);
+  const covered = items.filter((item) => item.covered > 0.0001);
+
+  status.innerHTML = `
+    <div style="margin:8px 0 12px">
+      <strong>${shortDate(start)}–${shortDate(end)}</strong><br>
+      <small>
+        Меню: ${escapeHtml(weekStatusLabel(week.status))} ·
+        купить позиций: ${toBuy.length}
+      </small>
+    </div>
+  `;
+
+  if (!meals.length) {
+    content.innerHTML = `
+      <div style="padding:14px;border:1px solid #444;border-radius:12px">
+        На этой неделе меню ещё пустое. Сначала составь неделю.
+      </div>
+    `;
+    return;
+  }
+
+  const ingredientsCount = meals.reduce(
+    (sum, meal) =>
+      sum + (Array.isArray(meal.ingredients) ? meal.ingredients.length : 0),
+    0
+  );
+
+  if (!ingredientsCount) {
+    content.innerHTML = `
+      <div style="padding:14px;border:1px solid #444;border-radius:12px">
+        В меню нет данных об ингредиентах. Ручные блюда без рецепта в покупки пока не попадают.
+      </div>
+    `;
+    return;
+  }
+
+  const buyHtml = toBuy.length
+    ? toBuy
+        .map(
+          (item) => `
+            <div style="padding:11px 0;border-top:1px solid #444;display:flex;justify-content:space-between;gap:12px">
+              <div>
+                <strong>${escapeHtml(item.name)}</strong>
+                ${item.covered > 0
+                  ? `<div style="font-size:12px;opacity:.68;margin-top:3px">
+                       Нужно всего ${formatShoppingAmount(item.amount)} ${escapeHtml(item.unit)},
+                       дома есть ${formatShoppingAmount(item.covered)} ${escapeHtml(item.unit)}
+                     </div>`
+                  : ""}
+              </div>
+              <div style="white-space:nowrap;font-weight:800">
+                ${formatShoppingAmount(item.buy)} ${escapeHtml(item.unit)}
+              </div>
+            </div>
+          `
+        )
+        .join("")
+    : `
+        <div style="padding:12px 0">
+          Всё меню покрывается текущими остатками — покупать ничего не нужно.
+        </div>
+      `;
+
+  const coveredHtml = covered.length
+    ? `
+      <details style="margin-top:14px">
+        <summary style="cursor:pointer;font-weight:700">
+          Что уже есть дома (${covered.length})
+        </summary>
+        <div style="margin-top:8px">
+          ${covered
+            .map(
+              (item) => `
+                <div style="padding:8px 0;border-top:1px solid #444;display:flex;justify-content:space-between;gap:12px">
+                  <span>${escapeHtml(item.name)}</span>
+                  <span style="white-space:nowrap;opacity:.75">
+                    ${formatShoppingAmount(item.covered)} ${escapeHtml(item.unit)}
+                  </span>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+
+  content.innerHTML = `
+    ${week.status !== "approved"
+      ? `
+        <div style="margin-bottom:12px;padding:12px;border:1px solid #665c2f;border-radius:12px">
+          <strong>Неделя ещё не утверждена</strong>
+          <div style="font-size:13px;opacity:.75;margin-top:4px">
+            Список уже можно смотреть, но после изменений меню он пересчитается.
+          </div>
+        </div>
+      `
+      : ""}
+
+    <div style="padding:12px;border:1px solid #444;border-radius:12px">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <strong>Нужно купить</strong>
+        <button id="copyShoppingBtn">Скопировать</button>
+      </div>
+      <div style="margin-top:8px">${buyHtml}</div>
+    </div>
+
+    ${coveredHtml}
+  `;
+
+  document.querySelector("#copyShoppingBtn").addEventListener("click", async () => {
+    const text = shoppingText(items, week);
+
+    try {
+      await navigator.clipboard.writeText(text);
+      const button = document.querySelector("#copyShoppingBtn");
+      button.textContent = "Скопировано";
+      setTimeout(() => {
+        const current = document.querySelector("#copyShoppingBtn");
+        if (current) current.textContent = "Скопировать";
+      }, 1200);
+    } catch {
+      prompt("Скопируй список", text);
+    }
+  });
+}
+
 if (retryBtn) {
   retryBtn.addEventListener("click", authenticate);
 }
@@ -1044,12 +1384,13 @@ document.querySelectorAll(".tile").forEach((button) => {
       return;
     }
 
-    const names = {
-      shopping: "Покупки",
-    };
+    if (action === "shopping") {
+      await showShopping();
+      return;
+    }
 
     placeholder.innerHTML = `
-      <h2>${names[action] || "Раздел"}</h2>
+      <h2>Раздел</h2>
       <p>Подключим следующим этапом.</p>
     `;
 
