@@ -756,7 +756,7 @@ async function generateWeek(weekId) {
 
   const confirmed = confirm(
     "Составить всю неделю автоматически?\n\n" +
-    "Уже введённые вручную блюда сохранят свои названия, а остальные слоты ИИ заполнит по остаткам и активным правилам."
+    "Уже введённые вручную блюда сохранят свои названия, а остальные слоты планировщик заполнит по остаткам и активным правилам."
   );
 
   if (!confirmed) return;
@@ -764,7 +764,7 @@ async function generateWeek(weekId) {
   button.disabled = true;
   button.textContent = "⏳ Составляем неделю…";
   generationStatus.textContent =
-    "ИИ проверяет остатки, правила семьи, порции и двухдневные заготовки. Это может занять до минуты.";
+    "Планировщик проверяет остатки, правила семьи, порции и двухдневные заготовки.";
 
   try {
     const response = await fetch(WEEK_GENERATE_URL, {
@@ -884,7 +884,7 @@ function renderWeek(week, meals) {
         ✨ Составить неделю
       </button>
       <div id="weekGenerateStatus" style="font-size:13px;opacity:.75;margin-top:8px">
-        ИИ использует активные правила семьи и текущие остатки.
+        Планировщик использует активные правила семьи и текущие остатки.
       </div>
     </div>
   `;
