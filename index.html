@@ -37,6 +37,10 @@
       <div id="placeholder" class="card hidden"></div>
     </section>
   </main>
-  <script src="app.js?v=20260927-2352"></script>
+  <script>
+    const appScript = document.createElement("script");
+    appScript.src = "app.js?v=" + Date.now();
+    document.body.appendChild(appScript);
+  </script>
 </body>
 </html>
