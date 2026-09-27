@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Семейное меню</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <section class="hero">
+      <div class="eyebrow">MY FAMILY MEALS</div>
+      <h1>Семейное меню</h1>
+      <p id="status">Подключаем Telegram…</p>
+    </section>
+
+    <section id="authCard" class="card">
+      <h2>Вход</h2>
+      <p id="authText">Проверяем пользователя через Telegram.</p>
+      <button id="retryBtn" hidden>Повторить</button>
+    </section>
+
+    <section id="home" class="hidden">
+      <div class="card">
+        <h2 id="hello">Готово</h2>
+        <p>Это новая чистая версия. Старые меню и остатки сюда не переносим.</p>
+      </div>
+
+      <div class="grid">
+        <button class="tile" data-action="inventory"><b>Остатки</b><span>Что есть дома сейчас</span></button>
+        <button class="tile" data-action="rules"><b>Правила семьи</b><span>Аллергии, продукты, ограничения</span></button>
+        <button class="tile" data-action="week"><b>Новая неделя</b><span>Составление и проверка меню</span></button>
+        <button class="tile" data-action="shopping"><b>Покупки</b><span>Список после проверки меню</span></button>
+      </div>
+
+      <div id="placeholder" class="card hidden"></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
