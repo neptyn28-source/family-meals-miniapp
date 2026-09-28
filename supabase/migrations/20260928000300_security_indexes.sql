@@ -1,11 +1,11 @@
 -- Harden internal event-trigger function exposure and add covering indexes for new planner tables.
-do $
+do $$
 begin
   if to_regprocedure('public.rls_auto_enable()') is not null then
     execute 'revoke all on function public.rls_auto_enable() from public';
     execute 'revoke execute on function public.rls_auto_enable() from anon, authenticated';
   end if;
-end $;
+end $$;
 
 create index if not exists family_caps_ingredient_idx
   on public.family_ingredient_caps(ingredient_id)
