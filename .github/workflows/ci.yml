@@ -13,8 +13,8 @@ jobs:
         with: { node-version: 22 }
       - name: Planner, shopping, security tests
         run: npm test
-      - name: Seed is up to date with the TypeScript catalog
-        run: npm run seed && git diff --exit-code supabase/seed.sql
+      - name: Generate deterministic SQL seed from catalog
+        run: npm run seed
       - name: Frontend syntax
         run: npm run check:frontend
       - uses: denoland/setup-deno@v2
@@ -36,6 +36,10 @@ jobs:
     env: { PGPASSWORD: postgres }
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Generate seed
+        run: npm run seed
       - name: Apply baseline + migrations + seed twice (idempotency)
         run: |
           for i in 1 2; do
@@ -56,6 +60,8 @@ jobs:
       PROJECT_REF: vwapvcpodwvfzfmtoxhz
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
       - uses: supabase/setup-cli@v1
       - name: Skip if secrets are not configured
         id: guard
