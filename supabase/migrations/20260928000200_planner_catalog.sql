@@ -1446,6 +1446,7 @@ insert into public.family_rules (family_id,rule_type,code,description,enabled,ru
 insert into public.family_rules (family_id,rule_type,code,description,enabled,rule_kind,params)
  select f.id,'preference','planner_default_18','Сырники — любимый завтрак',true,'prefer_recipe','{"kind":"prefer_recipe","recipe_id":"syrniki_sour_cream","weight":2,"severity":"preference"}'::jsonb from public.families f
  on conflict (family_id,code) do nothing;
+insert into public.ingredient_aliases (alias_norm,ingredient_id) values ('куринная грудка','chicken_breast') on conflict (alias_norm) do update set ingredient_id=excluded.ingredient_id;
 update public.inventory i
 set ingredient_id=a.ingredient_id, updated_at=now()
 from public.ingredient_aliases a
