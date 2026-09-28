@@ -366,7 +366,7 @@ async function main(req: Request) {
 
     const shoppingRows = result.shopping.lines.map((x) => {
       const itemKey = `${x.ingredient_id ?? normalize(x.name)}|${x.unit}|${x.state}`;
-      const old = oldMap.get(itemKey);
+      const old: any = oldMap.get(itemKey);
       const sameNeed = old &&
         Math.abs(n(old.to_buy) - n(x.to_buy)) < 0.001 &&
         Math.abs(n(old.purchase_quantity) - n(x.purchase_amount)) < 0.001;
