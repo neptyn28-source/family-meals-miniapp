@@ -196,6 +196,8 @@ create table if not exists public.weekly_meal_feedback (
   week_id uuid not null references public.weekly_plans(id) on delete cascade,
   meal_id uuid not null references public.weekly_meals(id) on delete cascade,
   member_id uuid not null references public.family_members(id) on delete cascade,
+  recipe_key text references public.planner_recipes(id) on delete set null,
+  title_snapshot text not null,
   taste text check (taste in ('liked','neutral','disliked')),
   portion text check (portion in ('too_much','ok','too_little')),
   satiety int check (satiety is null or satiety between 0 and 10),
