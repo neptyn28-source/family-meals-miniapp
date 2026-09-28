@@ -24,14 +24,16 @@
     <section id="home" class="hidden">
       <div class="card">
         <h2 id="hello">Готово</h2>
-        <p>Это новая чистая версия. Старые меню и остатки сюда не переносим.</p>
+        <p>Общее семейное меню, остатки, покупки, настройки и отзывы синхронизируются через Supabase.</p>
       </div>
 
       <div class="grid">
         <button class="tile" data-action="inventory"><b>Остатки</b><span>Что есть дома сейчас</span></button>
         <button class="tile" data-action="rules"><b>Правила семьи</b><span>Аллергии, продукты, ограничения</span></button>
         <button class="tile" data-action="week"><b>Новая неделя</b><span>Составление и проверка меню</span></button>
-        <button class="tile" data-action="shopping"><b>Покупки</b><span>Список после проверки меню</span></button>
+        <button class="tile" data-action="shopping-server"><b>Покупки</b><span>Упаковки, цены и отметки купленного</span></button>
+        <button class="tile" data-action="settings"><b>Настройки</b><span>Бюджет, порции, перекусы и лимиты</span></button>
+        <button class="tile" data-action="feedback"><b>Отзывы</b><span>Вкус, порции, сытость и комментарии</span></button>
       </div>
 
       <div id="placeholder" class="card hidden"></div>
@@ -39,7 +41,13 @@
   </main>
   <script>
     const appScript = document.createElement("script");
-    appScript.src = "app.js?v=" + Date.now();
+    const version = Date.now();
+    appScript.src = "app.js?v=" + version;
+    appScript.onload = () => {
+      const hardeningScript = document.createElement("script");
+      hardeningScript.src = "ui-hardening.js?v=" + version;
+      document.body.appendChild(hardeningScript);
+    };
     document.body.appendChild(appScript);
   </script>
 </body>
