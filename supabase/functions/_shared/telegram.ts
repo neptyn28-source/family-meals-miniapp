@@ -16,7 +16,10 @@ export type InitDataResult =
 const enc = new TextEncoder();
 
 async function hmac(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
-  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const rawKey: ArrayBuffer = key instanceof Uint8Array
+    ? (new Uint8Array(key).buffer as ArrayBuffer)
+    : key;
+  const k = await crypto.subtle.importKey("raw", rawKey, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return crypto.subtle.sign("HMAC", k, enc.encode(data));
 }
 
