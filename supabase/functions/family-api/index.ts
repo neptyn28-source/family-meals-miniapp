@@ -576,13 +576,20 @@ async function main(req: Request) {
     if (action === "feedback.list") {
       const weekId = String(payload.week_id ?? "");
       await weekForFamily(weekId);
-      const [feedback, members] = await Promise.all([
+      const [feedback, members, meals] = await Promise.all([
         db.from("weekly_meal_feedback").select("*").eq("family_id", familyId).eq("week_id", weekId),
         db.from("family_members").select("id,name,role,active").eq("family_id", familyId).eq("active", true),
+        db.from("weekly_meals").select("id,title,recipe_key").eq("week_id", weekId),
       ]);
       if (feedback.error) throw feedback.error;
       if (members.error) throw members.error;
-      return reply({ ok: true, feedback: feedback.data ?? [], members: members.data ?? [] });
+      if (meals.error) throw meals.error;
+      const current = new Map((meals.data ?? []).map((m: any) => [String(m.id), m]));
+      const visible = (feedback.data ?? []).filter((x: any) => {
+        const meal = current.get(String(x.meal_id));
+        return meal && x.title_snapshot === meal.title && (x.recipe_key ?? null) === (meal.recipe_key ?? null);
+      });
+      return reply({ ok: true, feedback: visible, members: members.data ?? [] });
     }
 
     if (action === "feedback.save") {
@@ -607,6 +614,8 @@ async function main(req: Request) {
         week_id: meal.week_id,
         meal_id: mealId,
         member_id: memberId,
+        recipe_key: meal.recipe_key ?? null,
+        title_snapshot: meal.title,
         taste,
         portion,
         satiety,
