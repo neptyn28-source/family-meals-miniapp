@@ -847,12 +847,6 @@ async function showShopping() {
     content.innerHTML = `
       ${tripCard("sunday")}
       ${tripCard("thursday")}
-      ${covered.length ? `
-        <details class="subcard" style="margin-top:12px">
-          <summary>Полностью покрыто остатками/ранней закупкой · ${covered.length}</summary>
-          ${covered.map((x) => `<div class="muted" style="padding:6px 0">${escapeHtml(x.product_name)} — ${escapeHtml(amount(x.required_quantity))} ${escapeHtml(x.unit)}</div>`).join("")}
-        </details>
-      ` : ""}
     `;
 
     content.querySelectorAll("[data-shop]").forEach((box) => {
