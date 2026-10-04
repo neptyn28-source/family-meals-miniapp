@@ -133,6 +133,29 @@ test("AI menu rejects vague seasoning instructions", () => {
   assert.throws(() => validateAiMenuPlan(p), /нельзя по вкусу/);
 });
 
+
+test("AI menu rejects main-meal recipes without heat mode", () => {
+  const p = validPlan();
+  const block = p.cook_blocks.find((x) => x.id === "mon-tue-dinner");
+  block.recipe.steps = [
+    "Нарезать 900 г куриной грудки за 4 минуты.",
+    "Готовить курицу 10 минут.",
+    "Рис 360 г варить 15 минут и подать.",
+  ];
+  assert.throws(() => validateAiMenuPlan(p), /силу огня, температуру, мощность или режим/);
+});
+
+test("AI menu requires cooling storage and reheating for multi-day main meals", () => {
+  const p = validPlan();
+  const block = p.cook_blocks.find((x) => x.id === "mon-tue-dinner");
+  block.recipe.steps = [
+    "Нарезать 900 г куриной грудки за 4 минуты.",
+    "Обжаривать грудку 10 минут на среднем огне; 360 г риса варить 15 минут на слабом огне.",
+    "Разделить готовую партию на четыре порции за 2 минуты.",
+  ];
+  assert.throws(() => validateAiMenuPlan(p), /охлаждение второй части/);
+});
+
 test("two-day cook block is counted exactly once", () => {
   const p = validateAiMenuPlan(validPlan());
   const totals = aggregateAiCookBlocks(p);
