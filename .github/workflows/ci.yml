@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main, production-hardening]
+    branches: [main, ai-assisted-menu-flow]
   pull_request:
 
 jobs:
@@ -19,9 +19,16 @@ jobs:
         run: npm run check:frontend
       - uses: denoland/setup-deno@v2
         with: { deno-version: v2.x }
-      - name: Type-check Edge Functions and shared planner
+      - name: Type-check Edge Functions and shared code
         run: |
-          deno check             supabase/functions/family-api/index.ts             supabase/functions/week-generate/index.ts             supabase/functions/_shared/planner/planner.ts             supabase/functions/_shared/telegram.ts             supabase/functions/_shared/scope.ts
+          deno check \
+            supabase/functions/family-api/index.ts \
+            supabase/functions/ai-menu-api/index.ts \
+            supabase/functions/week-generate/index.ts \
+            supabase/functions/_shared/ai-menu.ts \
+            supabase/functions/_shared/planner/planner.ts \
+            supabase/functions/_shared/telegram.ts \
+            supabase/functions/_shared/scope.ts
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
         env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
