@@ -726,25 +726,43 @@ async function showWeek() {
 
 function mealDetails(meal) {
   const portions = meal.portions || {};
+  const portionComponents = meal.portion_components || {};
   const ingredients = Array.isArray(meal.ingredients) ? meal.ingredients : [];
   const recipe = meal.recipe || {};
   const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
-  if (!Object.keys(portions).length && !ingredients.length && !steps.length && !meal.notes) return "";
+
+  const roleLine = (role, label) => {
+    const components = Array.isArray(portionComponents[role]) ? portionComponents[role] : [];
+    const summary = portions[role] || "";
+    if (components.length) {
+      const parts = components.map((x) =>
+        escapeHtml(x.name) + " — " + escapeHtml(amount(x.amount)) + " " + escapeHtml(x.unit)
+      ).join("; ");
+      return "<li><b>" + label + ":</b> " + parts +
+        (summary ? "<div class=\"muted\" style=\"margin-top:3px\">" + escapeHtml(summary) + "</div>" : "") +
+        "</li>";
+    }
+    return summary ? "<li><b>" + label + ":</b> " + escapeHtml(summary) + "</li>" : "";
+  };
+
+  const portionHtml = [
+    roleLine("husband", "Муж"),
+    roleLine("wife", "Жена"),
+    roleLine("child", "Ребёнок"),
+  ].filter(Boolean).join("");
+
+  if (!portionHtml && !ingredients.length && !steps.length && !meal.notes) return "";
 
   return `
     <details>
       <summary>Подробнее</summary>
       <div class="details-body">
-        ${Object.keys(portions).length ? `
-          <b>Порции</b>
-          <ul>
-            ${portions.husband ? `<li>Муж: ${escapeHtml(portions.husband)}</li>` : ""}
-            ${portions.wife ? `<li>Жена: ${escapeHtml(portions.wife)}</li>` : ""}
-            ${portions.child ? `<li>Ребёнок: ${escapeHtml(portions.child)}</li>` : ""}
-          </ul>
+        ${portionHtml ? `
+          <b>Порции по составляющим</b>
+          <ul>${portionHtml}</ul>
         ` : ""}
         ${ingredients.length ? `
-          <b>Ингредиенты</b>
+          <b>Ингредиенты на всю готовку</b>
           <ul>${ingredients.map((x) => `<li>${escapeHtml(x.name)} — ${escapeHtml(amount(x.amount))} ${escapeHtml(x.unit)}</li>`).join("")}</ul>
         ` : ""}
         ${steps.length ? `<b>Как готовить</b><ol>${steps.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ol>` : ""}
@@ -759,7 +777,7 @@ function mealDetails(meal) {
 
 async function showShopping() {
   showPanel(
-    weekChooser("shop", "Покупки", "Бот суммирует cook-blocks один раз, вычитает совместимые остатки и округляет покупку до упаковок.") +
+    weekChooser("shop", "Покупки", "Покупки разделены на два захода: воскресенье и четверг. Бот вычитает остатки и переносит лишнее из упаковок в следующую закупку.") +
     '<div id="shopStatus" class="muted">Загружаем…</div><div id="shopContent"></div>'
   );
   bindWeekNav("shop", showShopping);
@@ -779,29 +797,58 @@ async function showShopping() {
 
     const need = items.filter((x) => Number(x.to_buy) > 0.0001);
     const covered = items.filter((x) => Number(x.to_buy) <= 0.0001);
+
+    const fallbackDate = (trip) =>
+      isoDate(addDays(activeWeekStart, trip === "thursday" ? 3 : -1));
+    const tripTitle = (trip, rows) => {
+      const iso = rows.find((x) => x.purchase_on)?.purchase_on || fallbackDate(trip);
+      const date = new Date(iso + "T12:00:00");
+      const formatted = new Intl.DateTimeFormat("ru-RU", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }).format(date);
+      const nice = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+      return (trip === "sunday" ? "Закупка 1 · " : "Закупка 2 · ") + nice;
+    };
+
+    const rowHtml = (x) => `
+      <label class="shopping-row">
+        <input type="checkbox" data-shop="${escapeHtml(x.id)}" ${x.purchased ? "checked" : ""}>
+        <span>
+          <b>${escapeHtml(x.product_name)}</b><br>
+          нужно ${escapeHtml(amount(x.to_buy))} ${escapeHtml(x.unit)}
+          ${x.packages != null ? ` · ${escapeHtml(x.packages)} уп.` : ""}
+          ${x.purchase_quantity != null ? ` · купить ${escapeHtml(amount(x.purchase_quantity))} ${escapeHtml(x.unit)}` : ""}
+          <br><span class="muted">
+            покрыто до этой закупки ${escapeHtml(amount(x.home_quantity))} ${escapeHtml(x.unit)}
+            ${x.store ? ` · ${escapeHtml(x.store)}` : ""}
+            ${x.estimated_price != null ? ` · ≈${escapeHtml(money(x.estimated_price))}` : " · цена неизвестна"}
+          </span>
+        </span>
+      </label>
+    `;
+
+    const tripCard = (trip) => {
+      const rows = need.filter((x) => (x.shopping_trip === "thursday" ? "thursday" : "sunday") === trip);
+      const knownCost = rows.reduce((sum, x) => sum + (Number(x.estimated_price) || 0), 0);
+      return `
+        <div class="subcard" style="margin-bottom:12px">
+          <h3 style="margin-top:0">${escapeHtml(tripTitle(trip, rows))}</h3>
+          <div class="muted" style="margin-bottom:8px">
+            ${rows.length ? `${rows.length} поз. · ≈${escapeHtml(money(knownCost))}` : "На этот заход покупать ничего не нужно"}
+          </div>
+          ${rows.map(rowHtml).join("")}
+        </div>
+      `;
+    };
+
     content.innerHTML = `
-      <div class="subcard">
-        <h3 style="margin-top:0">Купить · ${need.length}</h3>
-        ${need.map((x) => `
-          <label class="shopping-row">
-            <input type="checkbox" data-shop="${escapeHtml(x.id)}" ${x.purchased ? "checked" : ""}>
-            <span>
-              <b>${escapeHtml(x.product_name)}</b><br>
-              нужно ${escapeHtml(amount(x.to_buy))} ${escapeHtml(x.unit)}
-              ${x.packages != null ? ` · ${escapeHtml(x.packages)} уп.` : ""}
-              ${x.purchase_quantity != null ? ` · купить ${escapeHtml(amount(x.purchase_quantity))} ${escapeHtml(x.unit)}` : ""}
-              <br><span class="muted">
-                из дома ${escapeHtml(amount(x.home_quantity))} ${escapeHtml(x.unit)}
-                ${x.store ? ` · ${escapeHtml(x.store)}` : ""}
-                ${x.estimated_price != null ? ` · ≈${escapeHtml(money(x.estimated_price))}` : " · цена неизвестна"}
-              </span>
-            </span>
-          </label>
-        `).join("")}
-      </div>
+      ${tripCard("sunday")}
+      ${tripCard("thursday")}
       ${covered.length ? `
         <details class="subcard" style="margin-top:12px">
-          <summary>Полностью покрыто остатками · ${covered.length}</summary>
+          <summary>Полностью покрыто остатками/ранней закупкой · ${covered.length}</summary>
           ${covered.map((x) => `<div class="muted" style="padding:6px 0">${escapeHtml(x.product_name)} — ${escapeHtml(amount(x.required_quantity))} ${escapeHtml(x.unit)}</div>`).join("")}
         </details>
       ` : ""}

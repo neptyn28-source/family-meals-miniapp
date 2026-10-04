@@ -61,6 +61,8 @@ function mergeSettings(current: Record<string, unknown>, patch: Record<string, u
     "repetition",
     "kcal_day_ranges",
     "allow_unverified_budget",
+    "budget_hard_limit",
+    "shopping_weekdays",
   ]);
   const next = { ...current };
   for (const [k, v] of Object.entries(patch)) if (allowed.has(k)) next[k] = v;
@@ -80,6 +82,16 @@ function mergeSettings(current: Record<string, unknown>, patch: Record<string, u
   if (!Array.isArray(weekdays) || weekdays.some((x) => !Number.isInteger(x) || x < 1 || x > 7)) {
     throw new Error("Некорректные дни детского сада");
   }
+  const shoppingWeekdays = next.shopping_weekdays ?? [7, 4];
+  if (!Array.isArray(shoppingWeekdays) ||
+      shoppingWeekdays.length !== 2 ||
+      shoppingWeekdays.some((x) => !Number.isInteger(x) || x < 1 || x > 7) ||
+      !shoppingWeekdays.includes(7) ||
+      !shoppingWeekdays.includes(4)) {
+    throw new Error("Закупки должны быть запланированы на воскресенье и четверг");
+  }
+  next.shopping_weekdays = [7, 4];
+  next.budget_hard_limit = next.budget_hard_limit !== false;
   return next;
 }
 
@@ -515,6 +527,7 @@ async function main(req: Request) {
         eaters: null,
         portion_grams: {},
         portions: {},
+        portion_components: {},
         ingredients: [],
         recipe: {},
         notes: "Блюдо изменено вручную.",
@@ -552,7 +565,7 @@ async function main(req: Request) {
       const weekId = String(payload.week_id ?? "");
       await weekForFamily(weekId);
       const r = await db.from("weekly_shopping_items").select("*").eq("week_id", weekId).eq("family_id", familyId)
-        .order("purchased", { ascending: true }).order("product_name", { ascending: true });
+        .order("purchase_on", { ascending: true }).order("purchased", { ascending: true }).order("product_name", { ascending: true });
       if (r.error) throw r.error;
       return reply({ ok: true, items: r.data ?? [] });
     }
