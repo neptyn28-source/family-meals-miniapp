@@ -8,6 +8,6 @@
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test tests/*.test.ts",
     "seed": "node --experimental-strip-types --no-warnings scripts/build-seed.ts",
-    "check:frontend": "node --check app.js && node --check ui-hardening.js"
+    "check:frontend": "node --check app.js && node --check ui-hardening.js && node --check app-v2.js"
   }
 }
