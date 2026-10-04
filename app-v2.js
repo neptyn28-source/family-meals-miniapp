@@ -819,6 +819,7 @@ async function showShopping() {
       snack2: "перекус 2",
       dinner: "ужин",
     };
+    const mealOrder = { breakfast: 10, snack1: 20, lunch: 30, snack2: 40, dinner: 50 };
     const dayLabel = (iso) => {
       const names = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
       const d = new Date(String(iso) + "T12:00:00Z");
@@ -828,7 +829,7 @@ async function showShopping() {
       const rows = Array.isArray(x.used_for) ? x.used_for : [];
       return rows
         .slice()
-        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (SORT[a.meal_type] || 99) - (SORT[b.meal_type] || 99))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (mealOrder[a.meal_type] || 99) - (mealOrder[b.meal_type] || 99))
         .map((u) => dayLabel(u.date) + " " + (mealLabel[u.meal_type] || u.meal_type))
         .join(" · ");
     };
