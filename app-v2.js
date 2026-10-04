@@ -812,22 +812,23 @@ async function showShopping() {
       return (trip === "sunday" ? "Закупка 1 · " : "Закупка 2 · ") + nice;
     };
 
-    const rowHtml = (x) => `
+    const rowHtml = (x) => {
+      const buyQuantity = x.purchase_quantity != null ? x.purchase_quantity : x.to_buy;
+      return `
       <label class="shopping-row">
         <input type="checkbox" data-shop="${escapeHtml(x.id)}" ${x.purchased ? "checked" : ""}>
         <span>
           <b>${escapeHtml(x.product_name)}</b><br>
-          нужно ${escapeHtml(amount(x.to_buy))} ${escapeHtml(x.unit)}
+          <b>Купить ${escapeHtml(amount(buyQuantity))} ${escapeHtml(x.unit)}</b>
           ${x.packages != null ? ` · ${escapeHtml(x.packages)} уп.` : ""}
-          ${x.purchase_quantity != null ? ` · купить ${escapeHtml(amount(x.purchase_quantity))} ${escapeHtml(x.unit)}` : ""}
           <br><span class="muted">
-            покрыто до этой закупки ${escapeHtml(amount(x.home_quantity))} ${escapeHtml(x.unit)}
-            ${x.store ? ` · ${escapeHtml(x.store)}` : ""}
+            ${x.store ? escapeHtml(x.store) : "магазин не указан"}
             ${x.estimated_price != null ? ` · ≈${escapeHtml(money(x.estimated_price))}` : " · цена неизвестна"}
           </span>
         </span>
       </label>
     `;
+    };
 
     const tripCard = (trip) => {
       const rows = need.filter((x) => (x.shopping_trip === "thursday" ? "thursday" : "sunday") === trip);
