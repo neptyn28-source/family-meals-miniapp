@@ -161,10 +161,11 @@ function buildExportPrompt(args: {
   return `ЗАДАЧА ДЛЯ CHATGPT: СОСТАВИТЬ СЕМЕЙНОЕ МЕНЮ
 
 Ты составляешь меню как повар и планировщик питания. Бот НЕ выбирает блюда и НЕ определяет порции: это твоя работа.
-Бот после твоего ответа сам посчитает покупки по блоку JSON, вычтет остатки и округлит до упаковок.
+Бот после твоего ответа сам посчитает покупки по блоку JSON, вычтет остатки, округлит до упаковок и разобьёт покупки на 2 захода: воскресенье и четверг.
 
 Целевая неделя начинается: ${weekStart}.
 Бюджет семьи: ${family.budget_weekly ?? settings?.weekly_budget_rub ?? 8000} RUB в неделю.
+БЮДЖЕТ ЖЁСТКИЙ: если расчёт покупок после вычета остатков и округления до упаковок превысит лимит, бот ОТКЛОНИТ импорт. Планируй меню с запасом не менее 10% к лимиту.
 Магазины: ${(settings?.stores ?? []).join(", ") || "не указаны"}.
 Техника: ${(settings?.equipment ?? []).join(", ") || "не указана"}.
 
@@ -191,13 +192,17 @@ ${feedbackLines.length ? feedbackLines.join("\n") : "- Отзывов пока �
 КАК НУЖНО СОСТАВИТЬ МЕНЮ
 - Сделай меню на 7 дней: завтрак, перекус 1, обед, перекус 2, ужин.
 - Порции мужа и жены подбирай по их весу, цели и отзывам о сытости/порциях. Не используй старые автоматические диапазоны как главный источник истины.
+- Для КАЖДОГО домашнего приёма пищи обязательно дай portion_components отдельно для husband/wife/child: не общий вес блюда, а конкретно мясо/гарнир/овощи/соус и т.п. Количество указывай в готовом виде в g/ml/pcs. Для детсада у ребёнка массив может быть пустым, а пояснение идёт в portions.child.
 - Для ребёнка укажи отдельную детскую порцию и адаптацию блюда. В будни его обед может быть "Обед в детском саду" с external=true.
 - Учитывай остатки при выборе блюд, особенно скоропортящиеся/urgent, но не пытайся сам вычитать их из списка покупок — это сделает бот.
 - Двухдневную готовку для обедов/ужинов оформляй ОДНИМ cook_block на всю партию. Ингредиенты в этом блоке — ОБЩЕЕ количество сырья на все перечисленные servings, один раз.
 - Завтраки и перекусы не объединяй в двухдневные batch-блоки.
 - Ингредиенты указывай в сыром/покупном виде и точных g/ml/pcs.
 - Если одно блюдо готовится один раз на Пн+Вт, не дублируй его ингредиенты вторым блоком.
-- Сначала дай обычное понятное меню и короткие рецепты для человека.
+- Сначала дай обычное понятное меню и ПОДРОБНЫЕ рецепты для человека.
+- Никакой готовки "на глаз": в шагах указывай точные граммы/мл/шт, время в минутах, режим техники или силу огня/температуру, порядок закладки и признак готовности.
+- В seasoning нельзя писать "по вкусу", "щепотка", "немного", "примерно" или "около": только точное количество либо явно "без соли/специй".
+- Для двухдневной партии укажи, как охладить, хранить и разогреть вторую часть прямо в шагах рецепта.
 - В САМОМ КОНЦЕ обязательно дай ровно один JSON code block без комментариев внутри. Бот импортирует именно его.
 
 ОБЯЗАТЕЛЬНЫЙ JSON-КОНТРАКТ
@@ -207,7 +212,8 @@ days — ровно 7 последовательных дней.
 В каждом дне обязательны breakfast, snack1, lunch, snack2, dinner.
 Для еды дома у meal должен быть cook_block_id.
 Для еды вне дома: external=true и cook_block_id=null.
-portions содержит понятные порции husband/wife/child.
+portions содержит краткое понятное описание порций husband/wife/child.
+portion_components обязателен для домашней еды и содержит раскладку порции по составляющим для husband/wife/child; элементы: {"name":"готовая курица","amount":160,"unit":"g"}.
 cook_blocks описывают каждую готовку ровно один раз.
 Каждый cook_block перечисляет все слоты, которые он кормит, в serves.
 ingredients — суммарное количество сырья на ВЕСЬ cook_block.
@@ -227,13 +233,18 @@ state только raw, cooked, semi_finished, frozen, dry или canned.
           "title": "название",
           "cook_block_id": "mon-breakfast",
           "external": false,
-          "portions": {"husband":"...", "wife":"...", "child":"..."},
+          "portions": {"husband":"кратко", "wife":"кратко", "child":"кратко"},
+          "portion_components": {
+            "husband":[{"name":"основной белок","amount":160,"unit":"g"},{"name":"гарнир","amount":180,"unit":"g"},{"name":"овощи","amount":120,"unit":"g"}],
+            "wife":[{"name":"основной белок","amount":130,"unit":"g"},{"name":"гарнир","amount":150,"unit":"g"},{"name":"овощи","amount":100,"unit":"g"}],
+            "child":[{"name":"основной белок","amount":70,"unit":"g"},{"name":"гарнир","amount":80,"unit":"g"},{"name":"овощи","amount":50,"unit":"g"}]
+          },
           "notes": ""
         },
-        "snack1": {"title":"...", "cook_block_id":"mon-snack1", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "notes":""},
-        "lunch": {"title":"...", "cook_block_id":"mon-tue-lunch", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "notes":""},
-        "snack2": {"title":"...", "cook_block_id":"mon-snack2", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "notes":""},
-        "dinner": {"title":"...", "cook_block_id":"mon-tue-dinner", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "notes":""}
+        "snack1": {"title":"...", "cook_block_id":"mon-snack1", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "portion_components":{"husband":[{"name":"компонент","amount":100,"unit":"g"}],"wife":[{"name":"компонент","amount":80,"unit":"g"}],"child":[]}, "notes":""},
+        "lunch": {"title":"...", "cook_block_id":"mon-tue-lunch", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "portion_components":{"husband":[{"name":"компонент","amount":100,"unit":"g"}],"wife":[{"name":"компонент","amount":80,"unit":"g"}],"child":[]}, "notes":""},
+        "snack2": {"title":"...", "cook_block_id":"mon-snack2", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "portion_components":{"husband":[{"name":"компонент","amount":100,"unit":"g"}],"wife":[{"name":"компонент","amount":80,"unit":"g"}],"child":[]}, "notes":""},
+        "dinner": {"title":"...", "cook_block_id":"mon-tue-dinner", "external":false, "portions":{"husband":"...","wife":"...","child":"..."}, "portion_components":{"husband":[{"name":"компонент","amount":100,"unit":"g"}],"wife":[{"name":"компонент","amount":80,"unit":"g"}],"child":[]}, "notes":""}
       }
     }
   ],
@@ -248,10 +259,10 @@ state только raw, cooked, semi_finished, frozen, dry или canned.
         {"name":"куриная грудка","amount":900,"unit":"g","state":"raw"}
       ],
       "recipe": {
-        "steps":["шаг 1","шаг 2"],
-        "ready_output":"общий выход готовой партии",
-        "child_adaptation":"что отделить ребёнку до соли/соуса/специй",
-        "seasoning":"точное количество соли и специй для взрослой части"
+        "steps":["Взвесить и подготовить точные количества ингредиентов; указать конкретную нарезку и технику.","Готовить 8 минут на среднем огне/указать точную температуру; затем ещё 3 минуты после добавления соуса. Для партии на два дня описать охлаждение и разогрев второй части."],
+        "ready_output":"точный/оценочный общий выход готовой партии в г/мл/шт",
+        "child_adaptation":"что и сколько отделить ребёнку до соли/соуса/специй",
+        "seasoning":"например: соль 4 г, паприка 2 г; либо без соли/специй"
       }
     }
   ]
@@ -313,13 +324,25 @@ async function calculateShopping(args: {
     if (x.error) throw x.error;
   }
 
+  const addIsoDays = (value: string, days: number) => {
+    const d = new Date(value + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const shoppingTripForBlock = (block: AiMenuPlan["cook_blocks"][number]) => {
+    const firstServe = [...block.serves].map((x) => x.date).sort()[0] || plan.week_start;
+    return firstServe < addIsoDays(plan.week_start, 3) ? "sunday" : "thursday";
+  };
+  const purchaseOnForTrip = (trip: string) =>
+    trip === "thursday" ? addIsoDays(plan.week_start, 3) : addIsoDays(plan.week_start, -1);
+
   const { ingredients, index } = makeIngredientIndex(catalogR.data ?? [], aliasesR.data ?? []);
   const byId = new Map(ingredients.map((x) => [x.id, x]));
 
-  const overridden = new Set((familyPricesR.data ?? []).map((x: any) => `${x.ingredient_id}|${x.store}`));
+  const overridden = new Set((familyPricesR.data ?? []).map((x: any) => String(x.ingredient_id) + "|" + String(x.store)));
   const prices: IngredientPrice[] = [
     ...(globalPricesR.data ?? [])
-      .filter((x: any) => !overridden.has(`${x.ingredient_id}|${x.store}`))
+      .filter((x: any) => !overridden.has(String(x.ingredient_id) + "|" + String(x.store)))
       .map((x: any) => ({
         ingredient_id: String(x.ingredient_id),
         store: String(x.store),
@@ -345,10 +368,14 @@ async function calculateShopping(args: {
     amount: number;
     unit: string;
     state: string;
+    shopping_trip: "sunday" | "thursday";
+    purchase_on: string;
   };
   const reqMap = new Map<string, Requirement>();
 
   for (const block of plan.cook_blocks) {
+    const trip = shoppingTripForBlock(block) as "sunday" | "thursday";
+    const purchaseOn = purchaseOnForTrip(trip);
     for (const line of block.ingredients) {
       const ingredientId = index.resolve(line.name);
       const ing = ingredientId ? byId.get(ingredientId) : undefined;
@@ -356,10 +383,11 @@ async function calculateShopping(args: {
         const converted = toDefaultUnit(ing, Number(line.amount), line.unit);
         if (converted == null) {
           throw new AiMenuValidationError([
-            `Нельзя преобразовать ${line.name}: ${line.amount} ${line.unit} в ${ing.default_unit}. Исправь единицу в меню.`,
+            "Нельзя преобразовать " + line.name + ": " + line.amount + " " + line.unit + " в " + ing.default_unit + ". Исправь единицу в меню.",
           ]);
         }
-        const key = `${ingredientId}|${ing.default_unit}|${line.state}`;
+        const baseKey = ingredientId + "|" + ing.default_unit + "|" + line.state;
+        const key = trip + "|" + baseKey;
         const row = reqMap.get(key) ?? {
           key,
           ingredient_id: ingredientId,
@@ -367,12 +395,15 @@ async function calculateShopping(args: {
           amount: 0,
           unit: ing.default_unit,
           state: line.state,
+          shopping_trip: trip,
+          purchase_on: purchaseOn,
         };
         row.amount += converted;
         reqMap.set(key, row);
       } else {
         const normalized = normalizeIngredientName(line.name);
-        const key = `name:${normalized}|${line.unit}|${line.state}`;
+        const baseKey = "name:" + normalized + "|" + line.unit + "|" + line.state;
+        const key = trip + "|" + baseKey;
         const row = reqMap.get(key) ?? {
           key,
           ingredient_id: null,
@@ -380,6 +411,8 @@ async function calculateShopping(args: {
           amount: 0,
           unit: line.unit,
           state: line.state,
+          shopping_trip: trip,
+          purchase_on: purchaseOn,
         };
         row.amount += Number(line.amount);
         reqMap.set(key, row);
@@ -402,9 +435,14 @@ async function calculateShopping(args: {
   let unpriced = 0;
   let unverified = 0;
 
-  for (const req of reqMap.values()) {
+  const orderedRequirements = [...reqMap.values()].sort((a, b) => {
+    const tripOrder = a.shopping_trip === b.shopping_trip ? 0 : a.shopping_trip === "sunday" ? -1 : 1;
+    return tripOrder || a.name.localeCompare(b.name, "ru");
+  });
+
+  for (const req of orderedRequirements) {
     let need = req.amount;
-    let fromHome = 0;
+    let coveredBeforeTrip = 0;
     const ing = req.ingredient_id ? byId.get(req.ingredient_id) : undefined;
 
     for (const item of stock) {
@@ -427,7 +465,7 @@ async function calculateShopping(args: {
 
       const use = Math.min(need, available);
       need -= use;
-      fromHome += use;
+      coveredBeforeTrip += use;
       item.quantity -= use * backFactor;
     }
 
@@ -454,6 +492,19 @@ async function calculateShopping(args: {
           priceVerified = Boolean(p.manually_verified_at);
           estimated += price;
           if (!priceVerified) unverified++;
+
+          const surplus = Math.max(0, purchaseQuantity - toBuy);
+          if (surplus > 1e-9) {
+            stock.push({
+              id: "purchase:" + req.key,
+              ingredient_id: req.ingredient_id,
+              name_norm: normalizeIngredientName(req.name),
+              quantity: surplus,
+              unit: req.unit,
+              state: req.state,
+              urgent: false,
+            });
+          }
         }
       }
     }
@@ -466,7 +517,7 @@ async function calculateShopping(args: {
       ingredient_id: req.ingredient_id,
       product_name: req.name,
       required_quantity: Math.round(req.amount * 1000) / 1000,
-      home_quantity: Math.round(fromHome * 1000) / 1000,
+      home_quantity: Math.round(coveredBeforeTrip * 1000) / 1000,
       to_buy: Math.round(toBuy * 1000) / 1000,
       package_quantity: packageQuantity,
       packages,
@@ -477,6 +528,8 @@ async function calculateShopping(args: {
       estimated_price: price,
       price_known: priceKnown,
       price_verified: priceVerified,
+      shopping_trip: req.shopping_trip,
+      purchase_on: req.purchase_on,
     });
   }
 
@@ -619,7 +672,7 @@ async function main(req: Request) {
 
       return reply({
         ok: true,
-        prompt_version: "ai-menu-prompt-v1",
+        prompt_version: "ai-menu-prompt-v2",
         menu_format: AI_MENU_FORMAT,
         prompt,
       });
@@ -668,6 +721,29 @@ async function main(req: Request) {
         settings: settings.settings ?? {},
       });
 
+      if ((settings.settings?.budget_hard_limit ?? true) && shopping.estimated_cost_rub > shopping.budget_rub) {
+        const overBy = Math.round((shopping.estimated_cost_rub - shopping.budget_rub) * 100) / 100;
+        const costly = [...shopping.rows]
+          .filter((x: any) => Number(x.estimated_price) > 0)
+          .sort((a: any, b: any) => Number(b.estimated_price) - Number(a.estimated_price))
+          .slice(0, 6)
+          .map((x: any) => x.product_name + " ≈" + Math.round(Number(x.estimated_price)) + " ₽");
+        return reply({
+          ok: false,
+          error: "budget_exceeded",
+          message: "Меню дороже недельного бюджета на " + overBy + " ₽. Импорт не сохранён.",
+          issues: [
+            "Лимит: " + shopping.budget_rub + " ₽; расчёт: " + shopping.estimated_cost_rub + " ₽.",
+            costly.length ? "Самые дорогие покупки: " + costly.join(", ") + "." : "Упростите меню и используйте больше домашних остатков.",
+          ],
+          shopping: {
+            estimated_cost_rub: shopping.estimated_cost_rub,
+            budget_rub: shopping.budget_rub,
+            budget_status: shopping.budget_status,
+          },
+        }, 422);
+      }
+
       const blockById = new Map(plan.cook_blocks.map((b) => [b.id, b]));
       const mealRows: any[] = [];
 
@@ -689,6 +765,7 @@ async function main(req: Request) {
             title: meal.title,
             batch_key: meal.cook_block_id,
             portions: meal.portions,
+            portion_components: meal.portion_components,
             ingredients: ingredients.map((x: AiMenuIngredient) => ({
               ingredient_id: null,
               name: x.name,
