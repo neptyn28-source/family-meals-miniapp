@@ -34,3 +34,4 @@ CI:
 - Deno typecheck
 - migration idempotency
 - gitleaks secret scan
+Production: изменения в main проходят CI и затем деплоятся в Supabase Edge Functions.
