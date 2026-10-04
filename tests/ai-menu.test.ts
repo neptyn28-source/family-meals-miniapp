@@ -21,6 +21,13 @@ function validPlan() {
         cook_block_id: id,
         external,
         portions: { husband: "нормальная", wife: "нормальная", child: external ? "детский сад" : "детская" },
+        portion_components: external
+          ? { husband: [], wife: [], child: [] }
+          : {
+              husband: [{ name: "готовое блюдо", amount: 300, unit: "g" }],
+              wife: [{ name: "готовое блюдо", amount: 250, unit: "g" }],
+              child: [{ name: "готовое блюдо", amount: 150, unit: "g" }],
+            },
         notes: "",
       };
     }
@@ -42,7 +49,12 @@ function validPlan() {
         title: meal.title,
         serves: [{ date: day.date, meal_type: type }],
         ingredients: [{ name: "рис белый", amount: 100, unit: "g", state: "dry" }],
-        recipe: { steps: ["Приготовить"], ready_output: "", child_adaptation: "", seasoning: "" },
+        recipe: {
+          steps: ["Промыть 100 г риса 30 секунд.", "Варить рис 15 минут на слабом огне под крышкой."],
+          ready_output: "≈280 г готового риса",
+          child_adaptation: "Ребёнку подать без соли.",
+          seasoning: "Соль 1 г после отделения детской части.",
+        },
       });
     }
   }
@@ -57,7 +69,16 @@ function validPlan() {
       { name: "куриная грудка", amount: 900, unit: "g", state: "raw" },
       { name: "рис белый", amount: 360, unit: "g", state: "dry" },
     ],
-    recipe: { steps: ["Приготовить один раз на два дня"], ready_output: "", child_adaptation: "", seasoning: "" },
+    recipe: {
+      steps: [
+        "Нарезать 900 г куриной грудки, сковороду разогреть 2 минуты.",
+        "Обжаривать грудку 10 минут на среднем огне; 360 г риса варить 15 минут под крышкой.",
+        "Вторую половину охладить за 60 минут и убрать в холодильник; разогреть 5 минут на сковороде.",
+      ],
+      ready_output: "4 взрослые порции",
+      child_adaptation: "Ребёнку отделить курицу до соли.",
+      seasoning: "Соль 4 г на взрослую часть.",
+    },
   });
 
   return { format: AI_MENU_FORMAT, week_start: week, summary: "Тест", days, cook_blocks };
@@ -89,9 +110,27 @@ test("AI menu rejects duplicate serving blocks", () => {
     title: "Ошибка",
     serves: [{ date: "2026-10-05", meal_type: "dinner" }],
     ingredients: [{ name: "рис", amount: 1, unit: "g", state: "dry" }],
-    recipe: { steps: [], ready_output: "", child_adaptation: "", seasoning: "" },
+    recipe: {
+      steps: ["Промыть 1 г риса 30 секунд.", "Варить 15 минут на слабом огне."],
+      ready_output: "тестовая порция",
+      child_adaptation: "Ребёнку без соли.",
+      seasoning: "Соль 1 г.",
+    },
   });
   assert.throws(() => validateAiMenuPlan(p), /обслуживается сразу/);
+});
+
+test("AI menu requires component portion breakdown for home meals", () => {
+  const p = validPlan();
+  delete p.days[5].meals.dinner.portion_components.wife;
+  assert.throws(() => validateAiMenuPlan(p), /раскладка portion_components\.wife/);
+});
+
+test("AI menu rejects vague seasoning instructions", () => {
+  const p = validPlan();
+  const block = p.cook_blocks.find((x) => x.id === "mon-tue-dinner");
+  block.recipe.seasoning = "Соль по вкусу.";
+  assert.throws(() => validateAiMenuPlan(p), /нельзя по вкусу/);
 });
 
 test("two-day cook block is counted exactly once", () => {
