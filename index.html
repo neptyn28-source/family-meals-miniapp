@@ -24,30 +24,38 @@
     <section id="home" class="hidden">
       <div class="card">
         <h2 id="hello">Готово</h2>
-        <p>Общее семейное меню, остатки, покупки, настройки и отзывы синхронизируются через Supabase.</p>
+        <p>
+          Бот хранит факты и считает покупки. Меню составляет ChatGPT по твоим остаткам,
+          отзывам, правилам, весу и целям.
+        </p>
+      </div>
+
+      <div class="flow-card">
+        <div class="flow-step"><b>1</b><span>Заполни остатки, правила, вес/цели и отзывы</span></div>
+        <div class="flow-step"><b>2</b><span>Нажми «Выгрузить в ИИ» и отправь промт в ChatGPT</span></div>
+        <div class="flow-step"><b>3</b><span>Вставь готовое меню обратно — бот посчитает покупки</span></div>
       </div>
 
       <div class="grid">
-        <button class="tile" data-action="inventory"><b>Остатки</b><span>Что есть дома сейчас</span></button>
-        <button class="tile" data-action="rules"><b>Правила семьи</b><span>Аллергии, продукты, ограничения</span></button>
-        <button class="tile" data-action="week"><b>Новая неделя</b><span>Составление и проверка меню</span></button>
-        <button class="tile" data-action="shopping-server"><b>Покупки</b><span>Упаковки, цены и отметки купленного</span></button>
-        <button class="tile" data-action="settings"><b>Настройки</b><span>Бюджет, порции, перекусы и лимиты</span></button>
-        <button class="tile" data-action="feedback"><b>Отзывы</b><span>Вкус, порции, сытость и комментарии</span></button>
+        <button class="tile" data-action="inventory"><b>Остатки</b><span>Что реально есть дома</span></button>
+        <button class="tile" data-action="rules"><b>Правила семьи</b><span>Аллергии, запреты, предпочтения</span></button>
+        <button class="tile" data-action="profile"><b>Вес и цели</b><span>Муж, жена, ребёнок и бюджет</span></button>
+        <button class="tile" data-action="feedback"><b>Отзывы</b><span>Вкус, порции, сытость, комментарии</span></button>
+
+        <button class="tile accent" data-action="ai-export"><b>Выгрузить в ИИ</b><span>Готовый промт для ChatGPT</span></button>
+        <button class="tile accent" data-action="ai-import"><b>Вставить меню из ИИ</b><span>Проверить JSON и посчитать покупки</span></button>
+
+        <button class="tile" data-action="week"><b>Меню недели</b><span>То, что импортировано из ChatGPT</span></button>
+        <button class="tile" data-action="shopping"><b>Покупки</b><span>Из дома / купить / упаковки / стоимость</span></button>
       </div>
 
       <div id="placeholder" class="card hidden"></div>
     </section>
   </main>
+
   <script>
     const appScript = document.createElement("script");
-    const version = Date.now();
-    appScript.src = "app.js?v=" + version;
-    appScript.onload = () => {
-      const hardeningScript = document.createElement("script");
-      hardeningScript.src = "ui-hardening.js?v=" + version;
-      document.body.appendChild(hardeningScript);
-    };
+    appScript.src = "app-v2.js?v=" + Date.now();
     document.body.appendChild(appScript);
   </script>
 </body>
