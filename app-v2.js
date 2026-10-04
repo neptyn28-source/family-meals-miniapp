@@ -812,8 +812,30 @@ async function showShopping() {
       return (trip === "sunday" ? "Закупка 1 · " : "Закупка 2 · ") + nice;
     };
 
+    const mealLabel = {
+      breakfast: "завтрак",
+      snack1: "перекус 1",
+      lunch: "обед",
+      snack2: "перекус 2",
+      dinner: "ужин",
+    };
+    const dayLabel = (iso) => {
+      const names = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+      const d = new Date(String(iso) + "T12:00:00Z");
+      return Number.isNaN(d.getTime()) ? String(iso) : names[d.getUTCDay()];
+    };
+    const usageText = (x) => {
+      const rows = Array.isArray(x.used_for) ? x.used_for : [];
+      return rows
+        .slice()
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (SORT[a.meal_type] || 99) - (SORT[b.meal_type] || 99))
+        .map((u) => dayLabel(u.date) + " " + (mealLabel[u.meal_type] || u.meal_type))
+        .join(" · ");
+    };
+
     const rowHtml = (x) => {
       const buyQuantity = x.purchase_quantity != null ? x.purchase_quantity : x.to_buy;
+      const usage = usageText(x);
       return `
       <label class="shopping-row">
         <input type="checkbox" data-shop="${escapeHtml(x.id)}" ${x.purchased ? "checked" : ""}>
@@ -825,6 +847,7 @@ async function showShopping() {
             ${x.store ? escapeHtml(x.store) : "магазин не указан"}
             ${x.estimated_price != null ? ` · ≈${escapeHtml(money(x.estimated_price))}` : " · цена неизвестна"}
           </span>
+          ${usage ? `<br><span class="muted">Куда: ${escapeHtml(usage)}</span>` : ""}
         </span>
       </label>
     `;
