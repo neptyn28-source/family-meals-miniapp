@@ -19,7 +19,7 @@ function dateLabel(date: string | null | undefined) {
   return date ? String(date) : "не указан";
 }
 
-function buildExportPrompt(args: {
+export function buildExportPrompt(args: {
   weekStart: string;
   family: any;
   members: any[];
