@@ -12,7 +12,7 @@ const placeholder = document.querySelector("#placeholder");
 
 let initData = "";
 let bootstrapData = null;
-let activeWeekStart = defaultPlanningMonday();
+let activeWeekStart = getMonday(new Date());
 
 if (tg) {
   tg.ready();
@@ -473,8 +473,19 @@ async function showProfile() {
       </div>
 
       <div class="subcard" style="margin-top:12px">
+        <h3 style="margin-top:0">Режим недели</h3>
         <label>Бюджет на неделю, ₽
           <input id="familyBudget" type="number" min="1" step="100" value="${escapeHtml(family.budget_weekly ?? 8000)}" style="${inputStyle("margin-top:4px")}">
+        </label>
+        <label>Перекусов у жены в день
+          <select id="wifeSnacks" style="${inputStyle("margin-top:4px")}">
+            ${[0,1,2].map((x) => `<option value="${x}" ${Number(settingsData.settings?.wife_snacks ?? 2) === x ? "selected" : ""}>${x}</option>`).join("")}
+          </select>
+        </label>
+        <label>Перекусов у мужа в день
+          <select id="husbandSnacks" style="${inputStyle("margin-top:4px")}">
+            ${[0,1,2].map((x) => `<option value="${x}" ${Number(settingsData.settings?.husband_snacks ?? 0) === x ? "selected" : ""}>${x}</option>`).join("")}
+          </select>
         </label>
       </div>
 
@@ -533,7 +544,11 @@ async function saveProfile() {
         child: { age_years: numOrNull("#childAge") },
       }),
       api("settings.update", {
-        settings: { weekly_budget_rub: Number(val("#familyBudget")) },
+        settings: {
+          weekly_budget_rub: Number(val("#familyBudget")),
+          wife_snacks: Number(val("#wifeSnacks")),
+          husband_snacks: Number(val("#husbandSnacks")),
+        },
       }),
     ]);
     status.textContent = "Сохранено.";
@@ -920,11 +935,23 @@ document.querySelectorAll(".tile").forEach((button) => {
     if (action === "inventory") return showInventory();
     if (action === "rules") return showRules();
     if (action === "profile") return showProfile();
-    if (action === "feedback") return showFeedback();
-    if (action === "ai-export") return showAiExport();
+    if (action === "feedback") {
+      activeWeekStart = getMonday(new Date());
+      return showFeedback();
+    }
+    if (action === "ai-export") {
+      activeWeekStart = defaultPlanningMonday();
+      return showAiExport();
+    }
     if (action === "ai-import") return showAiImport();
-    if (action === "week") return showWeek();
-    if (action === "shopping") return showShopping();
+    if (action === "week") {
+      activeWeekStart = defaultPlanningMonday();
+      return showWeek();
+    }
+    if (action === "shopping") {
+      activeWeekStart = defaultPlanningMonday();
+      return showShopping();
+    }
   });
 });
 
