@@ -1,4 +1,4 @@
-export const AI_MENU_FORMAT = "family-meal-plan-v1";
+export const AI_MENU_FORMAT = "family-meal-plan-v2";
 
 export const AI_MEAL_TYPES = ["breakfast", "snack1", "lunch", "snack2", "dinner"] as const;
 export type AiMealType = typeof AI_MEAL_TYPES[number];
@@ -10,11 +10,18 @@ export interface AiMenuIngredient {
   state: "raw" | "cooked" | "semi_finished" | "frozen" | "dry" | "canned";
 }
 
+export interface AiMenuPortionComponent {
+  name: string;
+  amount: number;
+  unit: "g" | "ml" | "pcs";
+}
+
 export interface AiMenuMeal {
   title: string;
   cook_block_id: string | null;
   external: boolean;
   portions: Record<string, string>;
+  portion_components: Record<string, AiMenuPortionComponent[]>;
   notes: string;
 }
 
@@ -78,6 +85,36 @@ function cleanPortions(v: unknown): Record<string, string> {
     if (!["husband", "wife", "child"].includes(k)) continue;
     const text = cleanText(value, 500);
     if (text) result[k] = text;
+  }
+  return result;
+}
+
+function cleanPortionComponents(v: unknown, issues: string[], slot: string): Record<string, AiMenuPortionComponent[]> {
+  const result: Record<string, AiMenuPortionComponent[]> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return result;
+
+  for (const role of ["husband", "wife", "child"]) {
+    const rawList = (v as Record<string, unknown>)[role];
+    if (rawList == null) continue;
+    if (!Array.isArray(rawList)) {
+      issues.push(slot + ": portion_components." + role + " должен быть массивом.");
+      continue;
+    }
+
+    const list: AiMenuPortionComponent[] = [];
+    for (let i = 0; i < rawList.length; i++) {
+      const item = rawList[i] as Record<string, unknown>;
+      const name = cleanText(item?.name, 200);
+      const amount = Number(item?.amount);
+      const unit = String(item?.unit ?? "");
+      if (!name) issues.push(slot + ": portion_components." + role + "[" + i + "] — пустое название компонента.");
+      if (!Number.isFinite(amount) || amount <= 0) issues.push(slot + ": portion_components." + role + "[" + i + "].amount должен быть > 0.");
+      if (!["g", "ml", "pcs"].includes(unit)) issues.push(slot + ": portion_components." + role + "[" + i + "].unit должен быть g/ml/pcs.");
+      if (name && Number.isFinite(amount) && amount > 0 && ["g", "ml", "pcs"].includes(unit)) {
+        list.push({ name, amount, unit: unit as AiMenuPortionComponent["unit"] });
+      }
+    }
+    result[role] = list;
   }
   return result;
 }
@@ -159,11 +196,22 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
         issues.push(`${day.date || `день ${i + 1}`} ${mealType}: external-блюдо не должно ссылаться на cook_block_id.`);
       }
 
+      const slotLabel = String(day.date || ("день " + (i + 1))) + " " + mealType;
+      const portionComponents = cleanPortionComponents(m.portion_components, issues, slotLabel);
+      if (!external) {
+        for (const role of ["husband", "wife"]) {
+          if (!portionComponents[role]?.length) {
+            issues.push(slotLabel + ": нужна раскладка portion_components." + role + " по составляющим блюда.");
+          }
+        }
+      }
+
       const normalized: AiMenuMeal = {
         title: cleanText(m.title, 500),
         cook_block_id: cookBlockId,
         external,
         portions: cleanPortions(m.portions),
+        portion_components: portionComponents,
         notes: cleanText(m.notes, 2000),
       };
       meals[mealType] = normalized;
@@ -232,6 +280,24 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
     const steps = Array.isArray(recipeRaw.steps)
       ? recipeRaw.steps.map((x: unknown) => cleanText(x, 1000)).filter(Boolean).slice(0, 30)
       : [];
+    const readyOutput = cleanText(recipeRaw.ready_output, 1000);
+    const childAdaptation = cleanText(recipeRaw.child_adaptation, 1500);
+    const seasoning = cleanText(recipeRaw.seasoning, 1500);
+    const hasMainMeal = serves.some((x) => ["breakfast", "lunch", "dinner"].includes(x.meal_type));
+
+    if (!steps.length) issues.push("cook_blocks[" + i + "].recipe.steps не должен быть пустым.");
+    if (hasMainMeal && steps.length < 2) {
+      issues.push("cook_blocks[" + i + "]: для завтрака/обеда/ужина нужно минимум 2 подробных шага.");
+    }
+    if (hasMainMeal && !steps.some((x) => /\d+(?:[.,]\d+)?\s*(?:мин|сек)/i.test(x))) {
+      issues.push("cook_blocks[" + i + "]: в рецепте должно быть точное время (например, 8 минут).");
+    }
+    if (!readyOutput) issues.push("cook_blocks[" + i + "].recipe.ready_output обязателен.");
+    if (!childAdaptation) issues.push("cook_blocks[" + i + "].recipe.child_adaptation обязателен.");
+    if (!seasoning) issues.push("cook_blocks[" + i + "].recipe.seasoning обязателен.");
+    if (/по вкусу|щепотк|немного|на глаз|примерно|около/i.test(seasoning)) {
+      issues.push("cook_blocks[" + i + "].recipe.seasoning: нельзя по вкусу/на глаз/примерно; укажи точное количество или без соли/специй.");
+    }
 
     normalizedBlocks.push({
       id,
@@ -240,9 +306,9 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
       ingredients,
       recipe: {
         steps,
-        ready_output: cleanText(recipeRaw.ready_output, 1000),
-        child_adaptation: cleanText(recipeRaw.child_adaptation, 1500),
-        seasoning: cleanText(recipeRaw.seasoning, 1500),
+        ready_output: readyOutput,
+        child_adaptation: childAdaptation,
+        seasoning,
       },
     });
   }
