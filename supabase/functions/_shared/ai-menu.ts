@@ -289,7 +289,7 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
     if (hasMainMeal && steps.length < 2) {
       issues.push("cook_blocks[" + i + "]: для завтрака/обеда/ужина нужно минимум 2 подробных шага.");
     }
-    if (hasMainMeal && !steps.some((x) => /\d+(?:[.,]\d+)?\s*(?:мин|сек)/i.test(x))) {
+    if (hasMainMeal && !steps.some((x: string) => /\d+(?:[.,]\d+)?\s*(?:мин|сек)/i.test(x))) {
       issues.push("cook_blocks[" + i + "]: в рецепте должно быть точное время (например, 8 минут).");
     }
     if (!readyOutput) issues.push("cook_blocks[" + i + "].recipe.ready_output обязателен.");
