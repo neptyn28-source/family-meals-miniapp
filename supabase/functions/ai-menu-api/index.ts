@@ -185,6 +185,7 @@ async function calculateShopping(args: {
     state: string;
     shopping_trip: "sunday" | "thursday";
     purchase_on: string;
+    used_for: { date: string; meal_type: string; title: string; block_id: string }[];
   };
   const reqMap = new Map<string, Requirement>();
 
@@ -212,8 +213,15 @@ async function calculateShopping(args: {
           state: line.state,
           shopping_trip: trip,
           purchase_on: purchaseOn,
+          used_for: [],
         };
         row.amount += converted;
+        for (const serve of block.serves) {
+          const usageKey = serve.date + "|" + serve.meal_type + "|" + block.id;
+          if (!row.used_for.some((x) => x.date + "|" + x.meal_type + "|" + x.block_id === usageKey)) {
+            row.used_for.push({ date: serve.date, meal_type: serve.meal_type, title: block.title, block_id: block.id });
+          }
+        }
         reqMap.set(key, row);
       } else {
         const normalized = normalizeIngredientName(line.name);
@@ -228,8 +236,15 @@ async function calculateShopping(args: {
           state: line.state,
           shopping_trip: trip,
           purchase_on: purchaseOn,
+          used_for: [],
         };
         row.amount += Number(line.amount);
+        for (const serve of block.serves) {
+          const usageKey = serve.date + "|" + serve.meal_type + "|" + block.id;
+          if (!row.used_for.some((x) => x.date + "|" + x.meal_type + "|" + x.block_id === usageKey)) {
+            row.used_for.push({ date: serve.date, meal_type: serve.meal_type, title: block.title, block_id: block.id });
+          }
+        }
         reqMap.set(key, row);
       }
     }
@@ -345,6 +360,7 @@ async function calculateShopping(args: {
       price_verified: priceVerified,
       shopping_trip: req.shopping_trip,
       purchase_on: req.purchase_on,
+      used_for: req.used_for,
     });
   }
 
