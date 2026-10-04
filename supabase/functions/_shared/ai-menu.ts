@@ -286,11 +286,31 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
     const hasMainMeal = serves.some((x) => ["breakfast", "lunch", "dinner"].includes(x.meal_type));
 
     if (!steps.length) issues.push("cook_blocks[" + i + "].recipe.steps не должен быть пустым.");
-    if (hasMainMeal && steps.length < 2) {
-      issues.push("cook_blocks[" + i + "]: для завтрака/обеда/ужина нужно минимум 2 подробных шага.");
+    if (hasMainMeal && steps.length < 3) {
+      issues.push("cook_blocks[" + i + "]: для завтрака/обеда/ужина нужно минимум 3 подробных шага.");
     }
-    if (hasMainMeal && !steps.some((x: string) => /\d+(?:[.,]\d+)?\s*(?:мин|сек)/i.test(x))) {
+    const joinedSteps = steps.join(" ");
+    if (hasMainMeal && !/\d+(?:[.,]\d+)?\s*(?:мин|сек)/i.test(joinedSteps)) {
       issues.push("cook_blocks[" + i + "]: в рецепте должно быть точное время (например, 8 минут).");
+    }
+    if (hasMainMeal && !/\d+(?:[.,]\d+)?\s*(?:г|мл|шт\.?)/i.test(joinedSteps)) {
+      issues.push("cook_blocks[" + i + "]: в шагах должны быть точные количества продуктов в г/мл/шт.");
+    }
+    if (hasMainMeal && !/(?:слаб|средн|сильн)\w*\s+огн|огн\w*\s+(?:слаб|средн|сильн)|\d{2,3}\s*°?\s*[cс]|температур|мощност|режим/i.test(joinedSteps)) {
+      issues.push("cook_blocks[" + i + "]: укажи силу огня, температуру, мощность или режим техники.");
+    }
+    if (hasMainMeal && /по вкусу|щепотк|немного|на глаз|примерно|около/i.test(joinedSteps)) {
+      issues.push("cook_blocks[" + i + "].recipe.steps: нельзя готовить на глаз; нужны точные количества и время.");
+    }
+    const isMultiDayMain = hasMainMeal && new Set(serves.map((x) => x.date)).size > 1;
+    if (isMultiDayMain && !/охлад/i.test(joinedSteps)) {
+      issues.push("cook_blocks[" + i + "]: для партии на несколько дней опиши охлаждение второй части.");
+    }
+    if (isMultiDayMain && !/холодиль|контейнер|хран/i.test(joinedSteps)) {
+      issues.push("cook_blocks[" + i + "]: для партии на несколько дней опиши хранение второй части.");
+    }
+    if (isMultiDayMain && !/разогр/i.test(joinedSteps)) {
+      issues.push("cook_blocks[" + i + "]: для партии на несколько дней опиши точный разогрев второй части.");
     }
     if (!readyOutput) issues.push("cook_blocks[" + i + "].recipe.ready_output обязателен.");
     if (!childAdaptation) issues.push("cook_blocks[" + i + "].recipe.child_adaptation обязателен.");
