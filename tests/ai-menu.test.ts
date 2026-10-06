@@ -4,6 +4,7 @@ import {
   AI_MENU_FORMAT,
   AiMenuValidationError,
   aggregateAiCookBlocks,
+  inventoryUsageCompatible,
   parseAiMenuPlan,
   validateAiMenuPlan,
 } from "../supabase/functions/_shared/ai-menu.ts";
@@ -48,7 +49,7 @@ function validPlan() {
         id: meal.cook_block_id,
         title: meal.title,
         serves: [{ date: day.date, meal_type: type }],
-        ingredients: [{ name: "рис белый", amount: 100, unit: "g", state: "dry" }],
+        ingredients: [{ name: "рис белый", amount: 100, unit: "g", state: "dry", use: "cooking" }],
         recipe: {
           steps: ["Промыть 100 г риса 30 секунд.", "Варить рис 15 минут на слабом огне под крышкой."],
           ready_output: "≈280 г готового риса",
@@ -66,8 +67,8 @@ function validPlan() {
       { date: dates[1], meal_type: "dinner" },
     ],
     ingredients: [
-      { name: "куриная грудка", amount: 900, unit: "g", state: "raw" },
-      { name: "рис белый", amount: 360, unit: "g", state: "dry" },
+      { name: "куриная грудка", amount: 900, unit: "g", state: "raw", use: "cooking" },
+      { name: "рис белый", amount: 360, unit: "g", state: "dry", use: "cooking" },
     ],
     recipe: {
       steps: [
@@ -109,7 +110,7 @@ test("AI menu rejects duplicate serving blocks", () => {
     id: "duplicate",
     title: "Ошибка",
     serves: [{ date: "2026-10-05", meal_type: "dinner" }],
-    ingredients: [{ name: "рис", amount: 1, unit: "g", state: "dry" }],
+    ingredients: [{ name: "рис", amount: 1, unit: "g", state: "dry", use: "cooking" }],
     recipe: {
       steps: ["Промыть 1 г риса 30 секунд.", "Варить 15 минут на слабом огне."],
       ready_output: "тестовая порция",
@@ -167,4 +168,16 @@ test("wrong week_start weekday is rejected", () => {
   const p = validPlan();
   p.week_start = "2026-10-06";
   assert.throws(() => validateAiMenuPlan(p), /понедельником/);
+});
+
+test("AI menu requires explicit ingredient use", () => {
+  const p = validPlan();
+  delete p.cook_blocks[0].ingredients[0].use;
+  assert.throws(() => validateAiMenuPlan(p), /use должен быть cooking или direct/);
+});
+
+test("cooking-only inventory cannot satisfy direct serving", () => {
+  assert.equal(inventoryUsageCompatible("cooking_only", "cooking"), true);
+  assert.equal(inventoryUsageCompatible("cooking_only", "direct"), false);
+  assert.equal(inventoryUsageCompatible("any", "direct"), true);
 });
