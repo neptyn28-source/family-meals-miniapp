@@ -13,6 +13,7 @@ const placeholder = document.querySelector("#placeholder");
 let initData = "";
 let bootstrapData = null;
 let activeWeekStart = getMonday(new Date());
+let editingInventoryId = null;
 
 if (tg) {
   tg.ready();
@@ -277,9 +278,10 @@ async function createInvite() {
 }
 
 async function showInventory() {
+  editingInventoryId = null;
   showPanel(`
     <h2>Остатки</h2>
-    <p>Записывай то, что реально есть дома. Готовое и сырое хранятся раздельно.</p>
+    <p>Записывай фактическое состояние продукта. Если остаток нельзя подавать напрямую, отметь «только в готовку» — это попадёт в отчёт для ChatGPT и будет учитываться при расчёте покупок.</p>
     <div class="form-grid">
       <input id="invName" placeholder="Продукт" style="${inputStyle()}">
       <input id="invQty" type="number" min="0" step="0.01" placeholder="Количество" style="${inputStyle()}">
@@ -294,14 +296,42 @@ async function showInventory() {
         <option value="dry">Сухое</option>
         <option value="canned">Консервы</option>
       </select>
+      <select id="invUsageMode" style="${inputStyle()}">
+        <option value="any">Можно использовать обычно</option>
+        <option value="cooking_only">Только в готовку — напрямую не подавать</option>
+      </select>
+      <textarea id="invNote" rows="2" placeholder="Заметка, например: старый кефир — не пить, только в выпечку/оладьи" style="${inputStyle("resize:vertical")}"></textarea>
       <label class="checkline"><input id="invUrgent" type="checkbox"> Использовать в первую очередь</label>
-      <button id="invAdd" style="${buttonStyle()}">Добавить</button>
+      <label class="checkline"><input id="invOpened" type="checkbox"> Упаковка открыта</label>
+      <div style="display:flex;gap:8px">
+        <button id="invAdd" style="${buttonStyle("flex:1")}">Добавить</button>
+        <button id="invCancelEdit" hidden>Отмена</button>
+      </div>
     </div>
     <div id="invStatus"></div>
     <div id="invList"></div>
   `);
-  document.querySelector("#invAdd").addEventListener("click", addInventory);
+  document.querySelector("#invAdd").addEventListener("click", saveInventoryItem);
+  document.querySelector("#invCancelEdit").addEventListener("click", resetInventoryForm);
   await loadInventory();
+}
+
+function usageModeLabel(mode) {
+  return mode === "cooking_only" ? "только в готовку" : "обычно";
+}
+
+function resetInventoryForm() {
+  editingInventoryId = null;
+  document.querySelector("#invName").value = "";
+  document.querySelector("#invQty").value = "";
+  document.querySelector("#invUnit").value = "g";
+  document.querySelector("#invState").value = "raw";
+  document.querySelector("#invUsageMode").value = "any";
+  document.querySelector("#invNote").value = "";
+  document.querySelector("#invUrgent").checked = false;
+  document.querySelector("#invOpened").checked = false;
+  document.querySelector("#invAdd").textContent = "Добавить";
+  document.querySelector("#invCancelEdit").hidden = true;
 }
 
 async function loadInventory() {
@@ -314,19 +344,50 @@ async function loadInventory() {
     list.innerHTML = data.items.length
       ? data.items.map((x) => `
           <div class="row-card">
-            <div>
+            <div style="flex:1">
               <b>${escapeHtml(x.name)}</b>
-              <div class="muted">${escapeHtml(amount(x.quantity))} ${escapeHtml(x.unit)} · ${escapeHtml(stateLabel(x.state))}${x.urgent ? " · срочно" : ""}</div>
+              <div class="muted">
+                ${escapeHtml(amount(x.quantity))} ${escapeHtml(x.unit)} ·
+                ${escapeHtml(stateLabel(x.state))} ·
+                ${escapeHtml(usageModeLabel(x.usage_mode))}
+                ${x.urgent ? " · срочно" : ""}
+                ${x.opened ? " · открыто" : ""}
+              </div>
+              ${x.note ? `<div style="margin-top:4px">${escapeHtml(x.note)}</div>` : ""}
             </div>
-            <button data-inv-delete="${escapeHtml(x.id)}">×</button>
+            <div style="display:flex;gap:6px">
+              <button data-inv-edit="${escapeHtml(x.id)}">✎</button>
+              <button data-inv-delete="${escapeHtml(x.id)}">×</button>
+            </div>
           </div>
         `).join("")
       : '<p>Остатков пока нет.</p>';
+
+    const byId = new Map(data.items.map((x) => [String(x.id), x]));
+    list.querySelectorAll("[data-inv-edit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const x = byId.get(button.dataset.invEdit);
+        if (!x) return;
+        editingInventoryId = String(x.id);
+        document.querySelector("#invName").value = x.name || "";
+        document.querySelector("#invQty").value = x.quantity ?? "";
+        document.querySelector("#invUnit").value = x.unit || "g";
+        document.querySelector("#invState").value = x.state || "raw";
+        document.querySelector("#invUsageMode").value = x.usage_mode || "any";
+        document.querySelector("#invNote").value = x.note || "";
+        document.querySelector("#invUrgent").checked = Boolean(x.urgent);
+        document.querySelector("#invOpened").checked = Boolean(x.opened);
+        document.querySelector("#invAdd").textContent = "Сохранить изменения";
+        document.querySelector("#invCancelEdit").hidden = false;
+        document.querySelector("#invName").scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
 
     list.querySelectorAll("[data-inv-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (!confirm("Удалить эту позицию?")) return;
         await api("inventory.delete", { id: button.dataset.invDelete });
+        if (editingInventoryId === button.dataset.invDelete) resetInventoryForm();
         await loadInventory();
       });
     });
@@ -335,7 +396,7 @@ async function loadInventory() {
   }
 }
 
-async function addInventory() {
+async function saveInventoryItem() {
   const name = document.querySelector("#invName").value.trim();
   const quantity = Number(document.querySelector("#invQty").value);
   if (!name || !Number.isFinite(quantity) || quantity < 0) {
@@ -344,17 +405,23 @@ async function addInventory() {
   }
   const button = document.querySelector("#invAdd");
   button.disabled = true;
+  const payload = {
+    name,
+    quantity,
+    unit: document.querySelector("#invUnit").value,
+    state: document.querySelector("#invState").value,
+    usage_mode: document.querySelector("#invUsageMode").value,
+    note: document.querySelector("#invNote").value.trim() || null,
+    urgent: document.querySelector("#invUrgent").checked,
+    opened: document.querySelector("#invOpened").checked,
+  };
   try {
-    await api("inventory.add", {
-      name,
-      quantity,
-      unit: document.querySelector("#invUnit").value,
-      state: document.querySelector("#invState").value,
-      urgent: document.querySelector("#invUrgent").checked,
-    });
-    document.querySelector("#invName").value = "";
-    document.querySelector("#invQty").value = "";
-    document.querySelector("#invUrgent").checked = false;
+    if (editingInventoryId) {
+      await api("inventory.update", { id: editingInventoryId, ...payload });
+    } else {
+      await api("inventory.add", payload);
+    }
+    resetInventoryForm();
     await loadInventory();
   } catch (error) {
     alert(error.message);

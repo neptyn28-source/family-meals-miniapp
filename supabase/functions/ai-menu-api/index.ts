@@ -3,6 +3,7 @@ import { verifyInitData } from "../_shared/telegram.ts";
 import {
   AI_MENU_FORMAT,
   AiMenuValidationError,
+  inventoryUsageCompatible,
   normalizeIngredientName,
   parseAiMenuPlan,
   type AiMenuIngredient,
@@ -183,6 +184,7 @@ async function calculateShopping(args: {
     amount: number;
     unit: string;
     state: string;
+    use: "cooking" | "direct";
     shopping_trip: "sunday" | "thursday";
     purchase_on: string;
     used_for: { date: string; meal_type: string; title: string; block_id: string }[];
@@ -202,7 +204,7 @@ async function calculateShopping(args: {
             "Нельзя преобразовать " + line.name + ": " + line.amount + " " + line.unit + " в " + ing.default_unit + ". Исправь единицу в меню.",
           ]);
         }
-        const baseKey = ingredientId + "|" + ing.default_unit + "|" + line.state;
+        const baseKey = ingredientId + "|" + ing.default_unit + "|" + line.state + "|" + line.use;
         const key = trip + "|" + baseKey;
         const row = reqMap.get(key) ?? {
           key,
@@ -211,6 +213,7 @@ async function calculateShopping(args: {
           amount: 0,
           unit: ing.default_unit,
           state: line.state,
+          use: line.use,
           shopping_trip: trip,
           purchase_on: purchaseOn,
           used_for: [],
@@ -225,7 +228,7 @@ async function calculateShopping(args: {
         reqMap.set(key, row);
       } else {
         const normalized = normalizeIngredientName(line.name);
-        const baseKey = "name:" + normalized + "|" + line.unit + "|" + line.state;
+        const baseKey = "name:" + normalized + "|" + line.unit + "|" + line.state + "|" + line.use;
         const key = trip + "|" + baseKey;
         const row = reqMap.get(key) ?? {
           key,
@@ -234,6 +237,7 @@ async function calculateShopping(args: {
           amount: 0,
           unit: line.unit,
           state: line.state,
+          use: line.use,
           shopping_trip: trip,
           purchase_on: purchaseOn,
           used_for: [],
@@ -257,8 +261,12 @@ async function calculateShopping(args: {
     quantity: Math.max(0, Number(x.quantity) || 0),
     unit: String(x.unit),
     state: String(x.state),
+    usage_mode: String(x.usage_mode ?? "any"),
     urgent: Boolean(x.urgent),
-  })).sort((a: any, b: any) => Number(b.urgent) - Number(a.urgent));
+  })).sort((a: any, b: any) => {
+    const restricted = Number(b.usage_mode === "cooking_only") - Number(a.usage_mode === "cooking_only");
+    return restricted || Number(b.urgent) - Number(a.urgent);
+  });
 
   const rows: any[] = [];
   let estimated = 0;
@@ -267,7 +275,8 @@ async function calculateShopping(args: {
 
   const orderedRequirements = [...reqMap.values()].sort((a, b) => {
     const tripOrder = a.shopping_trip === b.shopping_trip ? 0 : a.shopping_trip === "sunday" ? -1 : 1;
-    return tripOrder || a.name.localeCompare(b.name, "ru");
+    const useOrder = a.use === b.use ? 0 : a.use === "cooking" ? -1 : 1;
+    return tripOrder || useOrder || a.name.localeCompare(b.name, "ru");
   });
 
   for (const req of orderedRequirements) {
@@ -281,6 +290,7 @@ async function calculateShopping(args: {
         ? item.ingredient_id === req.ingredient_id
         : item.name_norm === normalizeIngredientName(req.name);
       if (!sameProduct || !stateCompatible(req.state, item.state)) continue;
+      if (!inventoryUsageCompatible(item.usage_mode, req.use)) continue;
 
       let available = item.quantity;
       let backFactor = 1;
@@ -332,6 +342,7 @@ async function calculateShopping(args: {
               quantity: surplus,
               unit: req.unit,
               state: req.state,
+              usage_mode: "any",
               urgent: false,
             });
           }
@@ -603,6 +614,7 @@ async function main(req: Request) {
               amount: x.amount,
               unit: x.unit,
               state: x.state,
+              use: x.use,
             })),
             recipe,
             notes: [

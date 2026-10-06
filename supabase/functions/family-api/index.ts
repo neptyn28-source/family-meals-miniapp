@@ -285,9 +285,11 @@ async function main(req: Request) {
       const quantity = Number(payload.quantity);
       const unit = String(payload.unit ?? "g").trim();
       const state = String(payload.state ?? "raw");
+      const usageMode = String(payload.usage_mode ?? "any");
       if (!name) return reply({ ok: false, error: "Product name is required" }, 400);
       if (!Number.isFinite(quantity) || quantity < 0) return reply({ ok: false, error: "Invalid quantity" }, 400);
       if (!STATES.has(state)) return reply({ ok: false, error: "Invalid product state" }, 400);
+      if (!["any", "cooking_only"].includes(usageMode)) return reply({ ok: false, error: "Invalid usage mode" }, 400);
 
       const normalized = name.toLowerCase().replaceAll("ё", "е").replace(/[^a-zа-я0-9]+/gi, " ").replace(/\s+/g, " ").trim();
       const alias = await db.from("ingredient_aliases").select("ingredient_id").eq("alias_norm", normalized).maybeSingle();
@@ -300,6 +302,7 @@ async function main(req: Request) {
         quantity,
         unit,
         state,
+        usage_mode: usageMode,
         category: payload.category ?? null,
         urgent: Boolean(payload.urgent),
         opened: Boolean(payload.opened),
@@ -307,6 +310,52 @@ async function main(req: Request) {
         use_by: payload.use_by ?? null,
         note: payload.note ?? null,
       }).select("*").single();
+      if (r.error) throw r.error;
+      return reply({ ok: true, item: r.data });
+    }
+
+    if (action === "inventory.update") {
+      const id = String(payload.id ?? "");
+      if (!id) return reply({ ok: false, error: "Inventory id is required" }, 400);
+
+      const existing = await db.from("inventory").select("*").eq("id", id).eq("family_id", familyId).maybeSingle();
+      if (existing.error) throw existing.error;
+      if (!existing.data) return reply({ ok: false, error: "Inventory item not found" }, 404);
+
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+      if (payload.name !== undefined) {
+        const name = String(payload.name ?? "").trim();
+        if (!name) return reply({ ok: false, error: "Product name is required" }, 400);
+        const normalized = name.toLowerCase().replaceAll("ё", "е").replace(/[^a-zа-я0-9]+/gi, " ").replace(/\s+/g, " ").trim();
+        const alias = await db.from("ingredient_aliases").select("ingredient_id").eq("alias_norm", normalized).maybeSingle();
+        if (alias.error) throw alias.error;
+        updates.name = name;
+        updates.ingredient_id = alias.data?.ingredient_id ?? null;
+      }
+      if (payload.quantity !== undefined) {
+        const quantity = Number(payload.quantity);
+        if (!Number.isFinite(quantity) || quantity < 0) return reply({ ok: false, error: "Invalid quantity" }, 400);
+        updates.quantity = quantity;
+      }
+      if (payload.unit !== undefined) updates.unit = String(payload.unit);
+      if (payload.state !== undefined) {
+        const state = String(payload.state);
+        if (!STATES.has(state)) return reply({ ok: false, error: "Invalid product state" }, 400);
+        updates.state = state;
+      }
+      if (payload.usage_mode !== undefined) {
+        const usageMode = String(payload.usage_mode);
+        if (!["any", "cooking_only"].includes(usageMode)) return reply({ ok: false, error: "Invalid usage mode" }, 400);
+        updates.usage_mode = usageMode;
+      }
+      if (payload.urgent !== undefined) updates.urgent = Boolean(payload.urgent);
+      if (payload.opened !== undefined) updates.opened = Boolean(payload.opened);
+      if (payload.frozen !== undefined) updates.frozen = Boolean(payload.frozen);
+      if (payload.use_by !== undefined) updates.use_by = payload.use_by || null;
+      if (payload.note !== undefined) updates.note = String(payload.note ?? "").trim().slice(0, 1000) || null;
+
+      const r = await db.from("inventory").update(updates).eq("id", id).eq("family_id", familyId).select("*").single();
       if (r.error) throw r.error;
       return reply({ ok: true, item: r.data });
     }

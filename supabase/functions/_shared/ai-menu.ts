@@ -1,13 +1,25 @@
-export const AI_MENU_FORMAT = "family-meal-plan-v2";
+export const AI_MENU_FORMAT = "family-meal-plan-v3";
 
 export const AI_MEAL_TYPES = ["breakfast", "snack1", "lunch", "snack2", "dinner"] as const;
 export type AiMealType = typeof AI_MEAL_TYPES[number];
+
+export type AiMenuIngredientUse = "cooking" | "direct";
 
 export interface AiMenuIngredient {
   name: string;
   amount: number;
   unit: "g" | "ml" | "pcs";
   state: "raw" | "cooked" | "semi_finished" | "frozen" | "dry" | "canned";
+  use: AiMenuIngredientUse;
+}
+
+export function inventoryUsageCompatible(
+  inventoryMode: string | null | undefined,
+  requirementUse: AiMenuIngredientUse,
+): boolean {
+  const mode = inventoryMode || "any";
+  if (mode === "cooking_only") return requirementUse === "cooking";
+  return true;
 }
 
 export interface AiMenuPortionComponent {
@@ -258,20 +270,26 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
       const amount = Number(ing.amount);
       const unit = String(ing.unit ?? "");
       const state = String(ing.state ?? "raw");
+      const use = String(ing.use ?? "");
       if (!nonEmpty(ing.name)) issues.push(`cook_blocks[${i}].ingredients[${j}]: пустое название.`);
       if (!Number.isFinite(amount) || amount <= 0) issues.push(`cook_blocks[${i}].ingredients[${j}]: amount должен быть > 0.`);
       if (!["g", "ml", "pcs"].includes(unit)) issues.push(`cook_blocks[${i}].ingredients[${j}]: unit должен быть g/ml/pcs.`);
       if (!["raw", "cooked", "semi_finished", "frozen", "dry", "canned"].includes(state)) {
         issues.push(`cook_blocks[${i}].ingredients[${j}]: неизвестное состояние ${state}.`);
       }
+      if (!["cooking", "direct"].includes(use)) {
+        issues.push(`cook_blocks[${i}].ingredients[${j}]: use должен быть cooking или direct.`);
+      }
       if (nonEmpty(ing.name) && Number.isFinite(amount) && amount > 0 &&
           ["g", "ml", "pcs"].includes(unit) &&
-          ["raw", "cooked", "semi_finished", "frozen", "dry", "canned"].includes(state)) {
+          ["raw", "cooked", "semi_finished", "frozen", "dry", "canned"].includes(state) &&
+          ["cooking", "direct"].includes(use)) {
         ingredients.push({
           name: cleanText(ing.name, 300),
           amount,
           unit: unit as AiMenuIngredient["unit"],
           state: state as AiMenuIngredient["state"],
+          use: use as AiMenuIngredient["use"],
         });
       }
     }
@@ -296,7 +314,7 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
     if (hasMainMeal && !/\d+(?:[.,]\d+)?\s*(?:г|мл|шт\.?)/i.test(joinedSteps)) {
       issues.push("cook_blocks[" + i + "]: в шагах должны быть точные количества продуктов в г/мл/шт.");
     }
-    if (hasMainMeal && !/(?:слаб|средн|сильн)\w*\s+огн|огн\w*\s+(?:слаб|средн|сильн)|\d{2,3}\s*°?\s*[cс]|температур|мощност|режим/i.test(joinedSteps)) {
+    if (hasMainMeal && !/(?:слаб|средн|сильн)[а-яё]*\s+огн|огн[а-яё]*\s+(?:слаб|средн|сильн)|\d{2,3}\s*°?\s*[cс]|температур|мощност|режим/i.test(joinedSteps)) {
       issues.push("cook_blocks[" + i + "]: укажи силу огня, температуру, мощность или режим техники.");
     }
     if (hasMainMeal && /по вкусу|щепотк|немного|на глаз|примерно|около/i.test(joinedSteps)) {
