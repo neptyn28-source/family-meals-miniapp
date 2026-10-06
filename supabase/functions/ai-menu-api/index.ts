@@ -614,6 +614,7 @@ async function main(req: Request) {
               amount: x.amount,
               unit: x.unit,
               state: x.state,
+              use: x.use,
             })),
             recipe,
             notes: [
