@@ -314,7 +314,7 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
     if (hasMainMeal && !/\d+(?:[.,]\d+)?\s*(?:г|мл|шт\.?)/i.test(joinedSteps)) {
       issues.push("cook_blocks[" + i + "]: в шагах должны быть точные количества продуктов в г/мл/шт.");
     }
-    if (hasMainMeal && !/(?:слаб|средн|сильн)\w*\s+огн|огн\w*\s+(?:слаб|средн|сильн)|\d{2,3}\s*°?\s*[cс]|температур|мощност|режим/i.test(joinedSteps)) {
+    if (hasMainMeal && !/(?:слаб|средн|сильн)[а-яё]*\s+огн|огн[а-яё]*\s+(?:слаб|средн|сильн)|\d{2,3}\s*°?\s*[cс]|температур|мощност|режим/i.test(joinedSteps)) {
       issues.push("cook_blocks[" + i + "]: укажи силу огня, температуру, мощность или режим техники.");
     }
     if (hasMainMeal && /по вкусу|щепотк|немного|на глаз|примерно|около/i.test(joinedSteps)) {
