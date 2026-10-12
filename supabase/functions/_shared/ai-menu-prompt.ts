@@ -30,6 +30,8 @@ export function buildExportPrompt(args: {
   feedback: any[];
 }) {
   const { weekStart, family, members, settings, profile, rules, inventory, feedback } = args;
+  const nutritionDetails = (p: any) => ` возраст ${p.age_years ?? "не указан"} лет; активность ${p.activity ?? "не указана"}; шагов/день ${p.steps_per_day ?? "не указано"}; тренировок/неделю ${p.training_frequency ?? "не указано"}; темп снижения веса ${p.weight_loss_pace ?? "не указан"}; особые обстоятельства ${p.special_circumstances ?? "не указаны"};`;
+
   const hard = rules.filter((x) => x.enabled && x.rule_type === "hard");
   const preferences = rules.filter((x) => x.enabled && x.rule_type !== "hard");
 
@@ -86,8 +88,8 @@ export function buildExportPrompt(args: {
 Техника: ${(settings?.equipment ?? []).join(", ") || "не указана"}.
 
 СОСТАВ СЕМЬИ И ЦЕЛИ
-- ${husbandName} (муж): вес ${profile.husband.weight_kg ?? "не указан"} кг; рост ${profile.husband.height_cm ?? "не указан"} см; цель — ${goalLabel(profile.husband.goal)}.
-- ${wifeName} (жена): вес ${profile.wife.weight_kg ?? "не указан"} кг; рост ${profile.wife.height_cm ?? "не указан"} см; цель — ${goalLabel(profile.wife.goal)}.
+- ${husbandName} (муж): вес ${profile.husband.weight_kg ?? "не указан"} кг; рост ${profile.husband.height_cm ?? "не указан"} см; цель — ${goalLabel(profile.husband.goal)}; ${nutritionDetails(profile.husband)}.
+- ${wifeName} (жена): вес ${profile.wife.weight_kg ?? "не указан"} кг; рост ${profile.wife.height_cm ?? "не указан"} см; цель — ${goalLabel(profile.wife.goal)}; ${nutritionDetails(profile.wife)}.
 - Ребёнок: возраст ${profile.child.age_years ?? "не указан"} года/лет.
 - Дни детского сада: ${(settings?.kindergarten_weekdays ?? [1,2,3,4,5]).join(", ")} (ISO: 1=пн ... 7=вс).
 - Перекусов у жены в день: ${settings?.wife_snacks ?? 2}.
