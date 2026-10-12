@@ -30,7 +30,7 @@ export function aggregateRequirements(meals: PlannedMeal[]) {
     for (const line of meal.ingredients) {
       const amount = Number(line.amount);
       if (!Number.isFinite(amount) || amount <= 0) continue;
-      const key = `${line.ingredient_id ?? "name:" + line.name}|${line.unit}|${line.state}`;
+      const key = `${line.ingredient_id ?? "name:" + line.name.trim().toLowerCase()}|${line.unit}|${line.state}`;
       const cur = req.get(key) ?? { ingredient_id: line.ingredient_id, name: line.name, unit: line.unit, state: line.state, amount: 0 };
       cur.amount += amount;
       req.set(key, cur);
@@ -78,7 +78,8 @@ export function buildShopping(args: {
   for (const r of requirements) {
     let need = r.amount;
     let covered = 0;
-    const ing = r.ingredient_id ? index.get(r.ingredient_id) : undefined;
+    const resolvedId = r.ingredient_id ?? index.resolve(r.name);
+    const ing = resolvedId ? index.get(resolvedId) : undefined;
 
     if (ing) {
       for (const s of stock) {
@@ -111,9 +112,15 @@ export function buildShopping(args: {
         cost = round(packageCount * price.price_rub, 2);
       }
     }
+    // Known retail pack size for this exact product; never invent a price or store.
+    if (!price && ing?.id === "activia_drink_grains") {
+      packAmount = 870;
+      packageCount = toBuy > EPS ? Math.ceil(toBuy / 870 - 1e-9) : 0;
+      purchase = packageCount * 870;
+    }
     const priceKnown = cost !== null;
     lines.push({
-      ingredient_id: r.ingredient_id,
+      ingredient_id: resolvedId,
       name: ing?.canonical_name ?? r.name,
       unit: r.unit,
       state: r.state,
