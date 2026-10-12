@@ -232,6 +232,18 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
     if (isDate(day.date)) normalizedDays.push({ date: day.date, meals });
   }
 
+  // Sunday is always a cafe day. No cooking blocks or shopping for Sunday.
+  for (const day of normalizedDays) {
+    if (new Date(day.date + "T12:00:00Z").getUTCDay() !== 0) continue;
+    for (const mealType of AI_MEAL_TYPES) {
+      const meal = day.meals[mealType];
+      if (!meal) continue;
+      if (!meal.external || meal.cook_block_id) {
+        issues.push(day.date + " " + mealType + ": воскресенье — день кафе; нужно external=true и cook_block_id=null.");
+      }
+    }
+  }
+
   const blocksRaw = Array.isArray(raw.cook_blocks) ? raw.cook_blocks : [];
   const normalizedBlocks: AiMenuCookBlock[] = [];
   const blockIds = new Set<string>();
