@@ -1,0 +1,26 @@
+name: Deploy AI menu API
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/ai-menu-api/**'
+      - 'supabase/functions/_shared/**'
+      - '.github/workflows/deploy-ai-menu-api.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Verify deploy token is configured
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: test -n "$SUPABASE_ACCESS_TOKEN" || (echo 'Set repository secret SUPABASE_ACCESS_TOKEN' && exit 1)
+      - name: Deploy ai-menu-api
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy ai-menu-api --project-ref vwapvcpodwvfzfmtoxhz --no-verify-jwt
