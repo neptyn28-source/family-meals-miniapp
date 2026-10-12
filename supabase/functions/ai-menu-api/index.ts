@@ -366,6 +366,26 @@ async function calculateShopping(args: {
         }
       }
     }
+    // A verified pack size may be known even when no store/price is known.
+    // Still round to full retail packs and carry surplus into the next trip.
+    if (toBuy > 1e-9 && packages === null && ing?.id === "activia_drink_grains") {
+      packageQuantity = 870;
+      packages = Math.ceil(toBuy / 870 - 1e-9);
+      purchaseQuantity = packages * 870;
+      const surplus = Math.max(0, purchaseQuantity - toBuy);
+      if (surplus > 1e-9) {
+        stock.push({
+          id: "purchase:" + req.key,
+          ingredient_id: req.ingredient_id,
+          name_norm: normalizeIngredientName(req.name),
+          quantity: surplus,
+          unit: req.unit,
+          state: req.state,
+          usage_mode: "any",
+          urgent: false,
+        });
+      }
+    }
     if (toBuy > 1e-9 && !priceKnown) unpriced++;
 
     rows.push({
