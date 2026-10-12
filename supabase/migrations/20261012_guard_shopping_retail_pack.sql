@@ -10,7 +10,7 @@ begin
     if new.unit <> 'g' then
       raise exception 'Активия со злаками должна учитываться в граммах, получено %', new.unit;
     end if;
-    if new.shopping_trip = 'thursday' then
+    if (new.package_quantity is distinct from 870 or new.packages is null) and new.shopping_trip = 'thursday' then
       select greatest(0, coalesce(sum(purchase_quantity - to_buy),0))
       into prior_surplus
       from public.weekly_shopping_items
