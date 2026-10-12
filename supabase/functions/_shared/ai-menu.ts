@@ -351,6 +351,37 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
     });
   }
 
+  // Keep consecutive home lunches and dinners in two-day cook batches.
+  // An odd final slot or a gap in the schedule may remain a single batch.
+  for (const mealType of ["lunch", "dinner"] as const) {
+    let pending: { date: string; blockId: string } | null = null;
+    for (const day of normalizedDays) {
+      const meal = day.meals[mealType];
+      const active = meal && !meal.external && meal.cook_block_id &&
+        !/не планиру|пропуск|детск(?:ий|ом) сад/i.test(meal.title);
+      if (!active) {
+        pending = null;
+        continue;
+      }
+      if (!pending) {
+        pending = { date: day.date, blockId: meal.cook_block_id! };
+      } else {
+        if (meal.cook_block_id !== pending.blockId) {
+          issues.push(mealType + " " + pending.date + " и " + day.date +
+            ": нужна одна готовка на два дня с общим cook_block_id и ингредиентами на обе даты.");
+        }
+        pending = null;
+      }
+    }
+  }
+  for (const block of normalizedBlocks) {
+    for (const ingredient of block.ingredients) {
+      if (/\\bтыкв[аыуеой]*\\b/i.test(ingredient.name)) {
+        issues.push(block.title + ": тыква запрещена — её невозможно купить.");
+      }
+    }
+  }
+
   for (const [slot, blockId] of slotToBlock) {
     if (!blockId) continue;
     if (!blockIds.has(blockId)) issues.push(`${slot}: cook_block_id "${blockId}" не найден.`);
