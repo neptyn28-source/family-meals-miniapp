@@ -68,17 +68,34 @@ function cleanPositive(v: unknown, max: number) {
   return Math.round(n * 10) / 10;
 }
 
+function cleanEnum(v: unknown, allowed: string[]) { return allowed.includes(String(v ?? "")) ? String(v) : null; }
+function cleanNonnegative(v: unknown, max: number) { if (v === null || v === undefined || v === "") return null; const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= max ? n : null; }
+
 function profileFromSettings(settings: any) {
   const p = settings?.ai_profile ?? {};
   return {
     husband: {
       weight_kg: cleanPositive(p?.husband?.weight_kg, 400),
       height_cm: cleanPositive(p?.husband?.height_cm, 260),
+      age_years: cleanPositive(p?.husband?.age_years, 100),
+      activity: cleanEnum(p?.husband?.activity, ["sedentary","moderate","high"]),
+      steps_per_day: cleanNonnegative(p?.husband?.steps_per_day, 50000),
+      training_frequency: cleanEnum(p?.husband?.training_frequency, ["0","1-2","3-4","5+"]),
+      weight_loss_pace: cleanEnum(p?.husband?.weight_loss_pace, ["moderate","faster"]) ?? "moderate",
+      special_circumstances: cleanEnum(p?.husband?.special_circumstances, ["pregnancy_lactation","medical"]),
+
       goal: cleanGoal(p?.husband?.goal),
     },
     wife: {
       weight_kg: cleanPositive(p?.wife?.weight_kg, 400),
       height_cm: cleanPositive(p?.wife?.height_cm, 260),
+      age_years: cleanPositive(p?.wife?.age_years, 100),
+      activity: cleanEnum(p?.wife?.activity, ["sedentary","moderate","high"]),
+      steps_per_day: cleanNonnegative(p?.wife?.steps_per_day, 50000),
+      training_frequency: cleanEnum(p?.wife?.training_frequency, ["0","1-2","3-4","5+"]),
+      weight_loss_pace: cleanEnum(p?.wife?.weight_loss_pace, ["moderate","faster"]) ?? "moderate",
+      special_circumstances: cleanEnum(p?.wife?.special_circumstances, ["pregnancy_lactation","medical"]),
+
       goal: cleanGoal(p?.wife?.goal),
     },
     child: {
@@ -466,11 +483,25 @@ async function main(req: Request) {
         husband: {
           weight_kg: cleanPositive(payload?.husband?.weight_kg, 400),
           height_cm: cleanPositive(payload?.husband?.height_cm, 260),
+      age_years: cleanPositive(payload?.husband?.age_years, 100),
+      activity: cleanEnum(payload?.husband?.activity, ["sedentary","moderate","high"]),
+      steps_per_day: cleanNonnegative(payload?.husband?.steps_per_day, 50000),
+      training_frequency: cleanEnum(payload?.husband?.training_frequency, ["0","1-2","3-4","5+"]),
+      weight_loss_pace: cleanEnum(payload?.husband?.weight_loss_pace, ["moderate","faster"]) ?? "moderate",
+      special_circumstances: cleanEnum(payload?.husband?.special_circumstances, ["pregnancy_lactation","medical"]),
+
           goal: cleanGoal(payload?.husband?.goal),
         },
         wife: {
           weight_kg: cleanPositive(payload?.wife?.weight_kg, 400),
           height_cm: cleanPositive(payload?.wife?.height_cm, 260),
+      age_years: cleanPositive(payload?.wife?.age_years, 100),
+      activity: cleanEnum(payload?.wife?.activity, ["sedentary","moderate","high"]),
+      steps_per_day: cleanNonnegative(payload?.wife?.steps_per_day, 50000),
+      training_frequency: cleanEnum(payload?.wife?.training_frequency, ["0","1-2","3-4","5+"]),
+      weight_loss_pace: cleanEnum(payload?.wife?.weight_loss_pace, ["moderate","faster"]) ?? "moderate",
+      special_circumstances: cleanEnum(payload?.wife?.special_circumstances, ["pregnancy_lactation","medical"]),
+
           goal: cleanGoal(payload?.wife?.goal),
         },
         child: {
