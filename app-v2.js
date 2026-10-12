@@ -576,6 +576,22 @@ function personProfileHtml(key, label, data) {
       <label>Рост, см <span class="muted">(необязательно)</span>
         <input id="${key}Height" type="number" min="50" max="260" step="0.1" value="${escapeHtml(data?.height_cm ?? "")}" style="${inputStyle("margin-top:4px")}">
       </label>
+      <h4>Расчёт нормы калорий</h4>
+      <label>Возраст, лет <input id="${key}Age" type="number" min="18" max="100" value="${escapeHtml(data?.age_years ?? "")}" style="${inputStyle("margin-top:4px")}"></label>
+      <label>Активность <select id="${key}Activity" style="${inputStyle("margin-top:4px")}">
+        ${[["","Не указана"],["sedentary","Сидячая"],["moderate","Умеренная"],["high","Высокая"]].map(([v,t])=>`<option value="${v}" ${data?.activity === v ? "selected" : ""}>${t}</option>`).join("")}
+      </select></label>
+      <label>Шагов в день <input id="${key}Steps" type="number" min="0" max="50000" step="100" value="${escapeHtml(data?.steps_per_day ?? "")}" style="${inputStyle("margin-top:4px")}"></label>
+      <label>Тренировок в неделю <select id="${key}Training" style="${inputStyle("margin-top:4px")}">
+        ${[["","Не указано"],["0","Нет"],["1-2","1–2"],["3-4","3–4"],["5+","5 и более"]].map(([v,t])=>`<option value="${v}" ${data?.training_frequency === v ? "selected" : ""}>${t}</option>`).join("")}
+      </select></label>
+      <label>Темп похудения <select id="${key}Pace" style="${inputStyle("margin-top:4px")}">
+        <option value="moderate" ${data?.weight_loss_pace !== "faster" ? "selected" : ""}>Умеренный</option>
+        <option value="faster" ${data?.weight_loss_pace === "faster" ? "selected" : ""}>Ускоренный (без экстремального дефицита)</option>
+      </select></label>
+      <label>Особые обстоятельства <select id="${key}Special" style="${inputStyle("margin-top:4px")}">
+        ${[["","Нет / не указаны"],["pregnancy_lactation","Беременность / грудное вскармливание"],["medical","Медицинские ограничения"]].map(([v,t])=>`<option value="${v}" ${data?.special_circumstances === v ? "selected" : ""}>${t}</option>`).join("")}
+      </select></label>
       <label>Цель
         <select id="${key}Goal" style="${inputStyle("margin-top:4px")}">
           <option value="lose" ${data?.goal === "lose" ? "selected" : ""}>Снижение веса</option>
@@ -602,11 +618,23 @@ async function saveProfile() {
           weight_kg: numOrNull("#husbandWeight"),
           height_cm: numOrNull("#husbandHeight"),
           goal: val("#husbandGoal"),
+          age_years: numOrNull("#husbandAge"),
+          activity: val("#husbandActivity"),
+          steps_per_day: numOrNull("#husbandSteps"),
+          training_frequency: val("#husbandTraining"),
+          weight_loss_pace: val("#husbandPace"),
+          special_circumstances: val("#husbandSpecial"),
         },
         wife: {
           weight_kg: numOrNull("#wifeWeight"),
           height_cm: numOrNull("#wifeHeight"),
           goal: val("#wifeGoal"),
+          age_years: numOrNull("#wifeAge"),
+          activity: val("#wifeActivity"),
+          steps_per_day: numOrNull("#wifeSteps"),
+          training_frequency: val("#wifeTraining"),
+          weight_loss_pace: val("#wifePace"),
+          special_circumstances: val("#wifeSpecial"),
         },
         child: { age_years: numOrNull("#childAge") },
       }),
