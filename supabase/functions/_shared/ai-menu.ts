@@ -356,6 +356,11 @@ export function validateAiMenuPlan(value: unknown): AiMenuPlan {
   for (const mealType of ["lunch", "dinner"] as const) {
     let pending: { date: string; blockId: string } | null = null;
     for (const day of normalizedDays) {
+      // Sunday is a standalone cheat day; never pair it with Saturday.
+      if (new Date(day.date + "T12:00:00Z").getUTCDay() === 0) {
+        pending = null;
+        continue;
+      }
       const meal = day.meals[mealType];
       const active = meal && !meal.external && meal.cook_block_id &&
         !/не планиру|пропуск|детск(?:ий|ом) сад/i.test(meal.title);
