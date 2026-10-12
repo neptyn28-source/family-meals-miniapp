@@ -58,7 +58,18 @@ export function buildShopping(args: {
   preferred_store?: string | null;
 }): ShoppingResult {
   const { meals, index, prices, budget_rub } = args;
-  const { requirements, manualWithout } = aggregateRequirements(meals);
+  const { requirements: rawRequirements, manualWithout } = aggregateRequirements(meals);
+  // Combine aliases and differently named rows for the same catalog product before
+  // stock allocation and package rounding (never round each meal separately).
+  const merged = new Map<string, typeof rawRequirements[number]>();
+  for (const r of rawRequirements) {
+    const id = r.ingredient_id ?? index.resolve(r.name);
+    const key = `${id ?? "name:" + r.name.trim().toLowerCase()}|${r.unit}|${r.state}`;
+    const prev = merged.get(key);
+    if (prev) prev.amount += r.amount;
+    else merged.set(key, { ...r, ingredient_id: id });
+  }
+  const requirements = [...merged.values()];
 
   // Working copy of stock, urgent items consumed first. Never mutates the input.
   const stock = args.inventory
