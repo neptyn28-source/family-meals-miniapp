@@ -1146,21 +1146,78 @@ async function showToday() {
   }
 }
 
+
+let cookingTimerInterval = null;
+let cookingTimerDeadline = 0;
+let cookingTimerRemaining = 300;
+function stopCookingTimer() {
+  if (cookingTimerInterval !== null) clearInterval(cookingTimerInterval);
+  cookingTimerInterval = null;
+  cookingTimerDeadline = 0;
+}
+function bindCookingTimer() {
+  const clock = document.querySelector("#cookTimerClock");
+  const message = document.querySelector("#cookTimerStatus");
+  if (!clock || !message) return;
+  const display = () => {
+    const seconds = Math.max(0, Math.ceil(cookingTimerRemaining));
+    clock.textContent = String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
+  };
+  const tick = () => {
+    if (!clock.isConnected) { stopCookingTimer(); return; }
+    cookingTimerRemaining = Math.max(0, Math.ceil((cookingTimerDeadline - Date.now()) / 1000));
+    display();
+    if (cookingTimerRemaining === 0) {
+      stopCookingTimer();
+      message.textContent = "Время вышло! Проверь блюдо.";
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("success");
+    }
+  };
+  document.querySelectorAll("[data-timer-min]").forEach((button) => button.addEventListener("click", () => {
+    stopCookingTimer();
+    cookingTimerRemaining = Number(button.dataset.timerMin) * 60;
+    message.textContent = "Время выбрано. Нажми «Старт».";
+    display();
+  }));
+  document.querySelector("#timerStart").addEventListener("click", () => {
+    if (cookingTimerInterval !== null || cookingTimerRemaining <= 0) return;
+    cookingTimerDeadline = Date.now() + cookingTimerRemaining * 1000;
+    cookingTimerInterval = setInterval(tick, 500);
+    message.textContent = "Идёт отсчёт.";
+  });
+  document.querySelector("#timerPause").addEventListener("click", () => {
+    if (cookingTimerInterval === null) return;
+    tick();
+    stopCookingTimer();
+    message.textContent = "Пауза.";
+  });
+  document.querySelector("#timerReset").addEventListener("click", () => {
+    stopCookingTimer();
+    cookingTimerRemaining = 300;
+    message.textContent = "Таймер сброшен.";
+    display();
+  });
+  display();
+}
+
 function showCookingMode(meal) {
   const recipe = meal.recipe || {};
   const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
   if (!steps.length) return;
   let index = 0;
-  showPanel('<div class="cook-mode"><button id="cookBack">← К сегодняшнему меню</button><h2>' + escapeHtml(meal.title) + '</h2><div id="cookProgress" class="muted"></div><div id="cookStep" class="cook-step" aria-live="polite"></div><div class="cook-controls"><button id="cookPrev">← Назад</button><button id="cookNext">Далее →</button></div><div class="subcard"><h3>Ингредиенты на всю готовку</h3><ul>' + (Array.isArray(meal.ingredients) ? meal.ingredients.map((x) => '<li>' + escapeHtml(x.name) + ' — ' + escapeHtml(amount(x.amount)) + ' ' + escapeHtml(x.unit) + '</li>').join("") : "") + '</ul></div>' + (recipe.child_adaptation ? '<p><b>Ребёнку:</b> ' + escapeHtml(recipe.child_adaptation) + '</p>' : '') + '</div>');
+  stopCookingTimer();
+  const timerMarkup = '<div class="cook-timer subcard"><b>⏱ Таймер готовки</b><div id="cookTimerClock" role="timer" aria-live="off">05:00</div><div class="cook-timer-buttons"><button data-timer-min="5">5 мин</button><button data-timer-min="10">10 мин</button><button data-timer-min="15">15 мин</button><button data-timer-min="30">30 мин</button></div><div class="cook-timer-buttons"><button id="timerStart">Старт</button><button id="timerPause">Пауза</button><button id="timerReset">Сброс</button></div><div id="cookTimerStatus" class="muted" aria-live="polite">Таймер работает, пока открыт рецепт.</div></div>';
+  showPanel(timerMarkup + '<div class="cook-mode"><button id="cookBack">← К сегодняшнему меню</button><h2>' + escapeHtml(meal.title) + '</h2><div id="cookProgress" class="muted"></div><div id="cookStep" class="cook-step" aria-live="polite"></div><div class="cook-controls"><button id="cookPrev">← Назад</button><button id="cookNext">Далее →</button></div><div class="subcard"><h3>Ингредиенты на всю готовку</h3><ul>' + (Array.isArray(meal.ingredients) ? meal.ingredients.map((x) => '<li>' + escapeHtml(x.name) + ' — ' + escapeHtml(amount(x.amount)) + ' ' + escapeHtml(x.unit) + '</li>').join("") : "") + '</ul></div>' + (recipe.child_adaptation ? '<p><b>Ребёнку:</b> ' + escapeHtml(recipe.child_adaptation) + '</p>' : '') + '</div>');
   const render = () => {
     document.querySelector("#cookProgress").textContent = "Шаг " + (index + 1) + " из " + steps.length;
     document.querySelector("#cookStep").textContent = steps[index];
     document.querySelector("#cookPrev").disabled = index === 0;
     document.querySelector("#cookNext").textContent = index === steps.length - 1 ? "Готово ✓" : "Далее →";
   };
-  document.querySelector("#cookBack").addEventListener("click", showToday);
+  bindCookingTimer();
+  document.querySelector("#cookBack").addEventListener("click", () => { stopCookingTimer(); showToday(); });
   document.querySelector("#cookPrev").addEventListener("click", () => { if (index > 0) { index--; render(); } });
-  document.querySelector("#cookNext").addEventListener("click", () => { if (index < steps.length - 1) { index++; render(); } else showToday(); });
+  document.querySelector("#cookNext").addEventListener("click", () => { if (index < steps.length - 1) { index++; render(); } else { stopCookingTimer(); showToday(); } });
   render();
 }
 
