@@ -79,3 +79,32 @@ button#retryBtn{
   .meal-row{grid-template-columns:78px 1fr}
   h1{font-size:30px}
 }
+
+/* ДОМА: warm, accessible visual refresh, compatible with Telegram themes */
+:root{
+  --bg:var(--tg-theme-bg-color,#f7f5ee);
+  --card:var(--tg-theme-secondary-bg-color,#fffdf8);
+  --text:var(--tg-theme-text-color,#22382f);
+  --hint:var(--tg-theme-hint-color,#6d7972);
+  --button:var(--tg-theme-button-color,#277957);
+  --buttonText:var(--tg-theme-button-text-color,#fff);
+}
+body{background:var(--bg)}
+.app{max-width:800px;padding:calc(20px + env(safe-area-inset-top)) 18px calc(64px + env(safe-area-inset-bottom))}
+.hero{padding:16px 6px 20px}
+.hero h1{font-size:clamp(29px,6vw,44px);line-height:1.08;letter-spacing:-.04em;font-weight:800}
+.hero h1 span{color:#dc9551}
+.eyebrow{letter-spacing:.18em;color:var(--button)}
+.card,.tile,.subcard,.flow-card{border-radius:22px;box-shadow:0 5px 24px rgba(28,52,37,.055)}
+#home>.card:first-child{padding:23px;background:linear-gradient(135deg,color-mix(in srgb,var(--button) 11%,var(--card)),var(--card))}
+#home>.card:first-child h2{font-size:23px;letter-spacing:-.025em}
+.grid{gap:12px}
+.tile{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:136px;padding:17px;border:1px solid color-mix(in srgb,var(--hint) 13%,transparent);transition:transform .18s ease,box-shadow .18s ease}
+.tile b{font-size:16px;line-height:1.2;margin:4px 0 0}
+.tile span:not(.tile-icon){font-size:12px}
+.tile-icon{font-size:25px;line-height:1.3}
+.tile.accent{outline:0;border:1px solid color-mix(in srgb,var(--button) 35%,transparent);background:color-mix(in srgb,var(--button) 9%,var(--card))}
+.tile:focus-visible,button:focus-visible{outline:3px solid var(--button);outline-offset:3px}
+@media(hover:hover){.tile:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(28,52,37,.1)}}
+@media(max-width:560px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tile{min-height:145px;padding:13px}.tile b{font-size:15px}.tile span:not(.tile-icon){font-size:11px}}
+@media(prefers-reduced-motion:reduce){.tile{transition:none}}
