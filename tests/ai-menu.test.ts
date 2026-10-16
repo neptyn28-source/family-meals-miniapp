@@ -39,16 +39,29 @@ function validPlan() {
   days[0].meals.dinner.cook_block_id = "mon-tue-dinner";
   days[1].meals.dinner.cook_block_id = "mon-tue-dinner";
 
+  // All weekday lunch/dinner pairs share one batch across two days.
+  for (const [first, second] of [[2, 3], [4, 5]]) {
+    for (const type of ["lunch", "dinner"]) {
+      const batchId = dates[first] + "-" + dates[second] + "-" + type;
+      days[first].meals[type].cook_block_id = batchId;
+      days[second].meals[type].cook_block_id = batchId;
+    }
+  }
+
   const cook_blocks: any[] = [];
   for (const day of days) {
     for (const type of ["breakfast","snack1","lunch","snack2","dinner"]) {
       const meal = day.meals[type];
       if (meal.external) continue;
       if (meal.cook_block_id === "mon-tue-dinner") continue;
+      const earlierDay = days.findIndex((d) => d.date === day.date);
+      if ((earlierDay === 3 || earlierDay === 5) && ["lunch", "dinner"].includes(type)) continue;
       cook_blocks.push({
         id: meal.cook_block_id,
         title: meal.title,
-        serves: [{ date: day.date, meal_type: type }],
+        serves: [{ date: day.date, meal_type: type },
+          ...([2, 4].includes(earlierDay) && ["lunch", "dinner"].includes(type)
+            ? [{ date: dates[earlierDay + 1], meal_type: type }] : [])],
         ingredients: [{ name: "рис белый", amount: 100, unit: "g", state: "dry", use: "cooking" }],
         recipe: {
           steps: ["Промыть 100 г риса 30 секунд.", "Варить 100 г риса 15 минут на слабом огне под крышкой.", "Снять с огня и выдержать 5 минут под крышкой, затем подать."],
