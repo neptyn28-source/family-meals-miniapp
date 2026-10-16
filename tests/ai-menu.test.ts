@@ -41,7 +41,7 @@ function validPlan() {
 
   // All weekday lunch/dinner pairs share one batch across two days.
   for (const [first, second] of [[2, 3], [4, 5]]) {
-    for (const type of ["lunch", "dinner"]) {
+    for (const type of ["dinner"]) {
       const batchId = dates[first] + "-" + dates[second] + "-" + type;
       days[first].meals[type].cook_block_id = batchId;
       days[second].meals[type].cook_block_id = batchId;
@@ -55,12 +55,12 @@ function validPlan() {
       if (meal.external) continue;
       if (meal.cook_block_id === "mon-tue-dinner") continue;
       const earlierDay = days.findIndex((d) => d.date === day.date);
-      if ((earlierDay === 3 || earlierDay === 5) && ["lunch", "dinner"].includes(type)) continue;
+      if ((earlierDay === 3 || earlierDay === 5) && type === "dinner") continue;
       cook_blocks.push({
         id: meal.cook_block_id,
         title: meal.title,
         serves: [{ date: day.date, meal_type: type },
-          ...([2, 4].includes(earlierDay) && ["lunch", "dinner"].includes(type)
+          ...([2, 4].includes(earlierDay) && type === "dinner"
             ? [{ date: dates[earlierDay + 1], meal_type: type }] : [])],
         ingredients: [{ name: "рис белый", amount: 100, unit: "g", state: "dry", use: "cooking" }],
         recipe: {
