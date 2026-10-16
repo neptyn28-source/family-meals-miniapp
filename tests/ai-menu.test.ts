@@ -15,13 +15,13 @@ function validPlan() {
   const days = dates.map((date, i) => {
     const meals: Record<string, any> = {};
     for (const type of ["breakfast","snack1","lunch","snack2","dinner"]) {
-      const external = type === "lunch" && i < 5;
+      const external = i === 6 || (type === "lunch" && i < 5);
       const id = external ? null : `${date}-${type}`;
       meals[type] = {
-        title: external ? "Обед в детском саду" : `Блюдо ${date} ${type}`,
+        title: i === 6 ? "Кафе — питание вне дома" : external ? "Обед в детском саду" : `Блюдо ${date} ${type}`,
         cook_block_id: id,
         external,
-        portions: { husband: "нормальная", wife: "нормальная", child: external ? "детский сад" : "детская" },
+        portions: { husband: "нормальная", wife: "нормальная", child: i === 6 ? "кафе" : external ? "детский сад" : "детская" },
         portion_components: external
           ? { husband: [], wife: [], child: [] }
           : {
