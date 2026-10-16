@@ -133,3 +133,10 @@ body{background:var(--bg)}
 .cook-timer-buttons{display:flex;gap:7px;flex-wrap:wrap}
 .cook-timer-buttons button{flex:1;min-width:65px;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:11px;padding:10px 8px;font-weight:700}
 #timerStart{background:var(--button);color:var(--buttonText)}
+
+.diary-person{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:17px;margin:14px 0}
+.diary-person h3{margin:0 0 12px}
+.diary-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.diary-stats>div{border-radius:13px;padding:12px 7px;background:color-mix(in srgb,var(--button) 8%,var(--card));text-align:center}
+.diary-stats b{display:block;font-size:24px;font-variant-numeric:tabular-nums}
+.diary-stats span{display:block;font-size:11px;color:var(--hint);margin-top:5px}
