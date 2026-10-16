@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Семейное меню</title>
+  <title>ДОМА — семейная кухня</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <main class="app">
     <section class="hero">
-      <div class="eyebrow">MY FAMILY MEALS</div>
-      <h1>Семейное меню</h1>
+      <div class="eyebrow">ДОМА · СЕМЕЙНАЯ КУХНЯ</div>
+      <h1>Вкусно жить дома <span aria-hidden="true">✦</span></h1>
       <p id="status">Подключаем Telegram…</p>
     </section>
 
@@ -23,30 +23,29 @@
 
     <section id="home" class="hidden">
       <div class="card">
-        <h2 id="hello">Готово</h2>
+        <h2 id="hello">Сегодня у нас дома</h2>
         <p>
-          Бот хранит факты и считает покупки. Меню составляет ChatGPT по твоим остаткам,
-          отзывам, правилам, весу и целям.
+          Планируем вкусную неделю, готовим на два дня и покупаем только нужное. Меню учитывает семейные вкусы и цели питания.
         </p>
       </div>
 
-      <div class="flow-card">
+      <div class="flow-card" aria-label="Как работает семейное меню">
         <div class="flow-step"><b>1</b><span>Заполни остатки, правила, вес/цели и отзывы</span></div>
         <div class="flow-step"><b>2</b><span>Нажми «Выгрузить в ИИ» и отправь промт в ChatGPT</span></div>
         <div class="flow-step"><b>3</b><span>Вставь готовое меню обратно — бот посчитает покупки</span></div>
       </div>
 
-      <div class="grid">
-        <button class="tile" data-action="inventory"><b>Остатки</b><span>Что реально есть дома</span></button>
-        <button class="tile" data-action="rules"><b>Правила семьи</b><span>Аллергии, запреты, предпочтения</span></button>
-        <button class="tile" data-action="profile"><b>Вес и цели</b><span>Муж, жена, ребёнок и бюджет</span></button>
-        <button class="tile" data-action="feedback"><b>Отзывы</b><span>Вкус, порции, сытость, комментарии</span></button>
+      <div class="grid" aria-label="Разделы семейной кухни">
+        <button class="tile" data-action="inventory"><span class="tile-icon" aria-hidden="true">🥬</span><b>Остатки</b><span>Что реально есть дома</span></button>
+        <button class="tile" data-action="rules"><span class="tile-icon" aria-hidden="true">❤️</span><b>Правила семьи</b><span>Аллергии, запреты, предпочтения</span></button>
+        <button class="tile" data-action="profile"><span class="tile-icon" aria-hidden="true">🎯</span><b>Вес и цели</b><span>Муж, жена, ребёнок и бюджет</span></button>
+        <button class="tile" data-action="feedback"><span class="tile-icon" aria-hidden="true">⭐</span><b>Отзывы</b><span>Вкус, порции, сытость, комментарии</span></button>
 
-        <button class="tile accent" data-action="ai-export"><b>Выгрузить в ИИ</b><span>Готовый промт для ChatGPT</span></button>
-        <button class="tile accent" data-action="ai-import"><b>Вставить меню из ИИ</b><span>Проверить JSON и посчитать покупки</span></button>
+        <button class="tile accent" data-action="ai-export"><span class="tile-icon" aria-hidden="true">✨</span><b>Создать меню</b><span>Готовый промт для ChatGPT</span></button>
+        <button class="tile accent" data-action="ai-import"><span class="tile-icon" aria-hidden="true">📥</span><b>Загрузить меню</b><span>Проверить JSON и посчитать покупки</span></button>
 
-        <button class="tile" data-action="week"><b>Меню недели</b><span>То, что импортировано из ChatGPT</span></button>
-        <button class="tile" data-action="shopping"><b>Покупки</b><span>Два захода: воскресенье и четверг</span></button>
+        <button class="tile" data-action="week"><span class="tile-icon" aria-hidden="true">🍽️</span><b>Меню недели</b><span>То, что импортировано из ChatGPT</span></button>
+        <button class="tile" data-action="shopping"><span class="tile-icon" aria-hidden="true">🛒</span><b>Покупки</b><span>Два захода: воскресенье и четверг</span></button>
       </div>
 
       <div id="placeholder" class="card hidden"></div>
