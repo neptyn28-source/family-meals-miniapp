@@ -340,7 +340,9 @@ async function loadInventory() {
   status.textContent = "Загружаем…";
   try {
     const data = await api("inventory.list");
-    status.textContent = `Позиций: ${data.items.length}`;
+    const urgentCount = data.items.filter((x) => x.urgent).length;
+    const openedCount = data.items.filter((x) => x.opened).length;
+    status.textContent = `В холодильнике: ${data.items.length} поз. · Срочно использовать: ${urgentCount} · Открыто: ${openedCount}`;
     list.innerHTML = data.items.length
       ? data.items.map((x) => `
           <div class="row-card">
@@ -891,6 +893,21 @@ async function showShopping() {
     }
 
     const need = items.filter((x) => Number(x.to_buy) > 0.0001);
+    const purchasedCount = need.filter((x) => x.purchased).length;
+    const knownBudget = Number(weekData.week.estimated_cost);
+    const budgetText = Number.isFinite(knownBudget) && weekData.week.estimated_cost != null
+      ? " · План: " + money(knownBudget) : "";
+    const progress = document.createElement("div");
+    progress.className = "shopping-progress";
+    progress.innerHTML = '<div id="shopProgressText" aria-live="polite"></div><progress id="shopProgress" max="' + Math.max(need.length, 1) + '" value="' + purchasedCount + '"></progress><div class="muted">Отмечай купленное — список сохранится для всей семьи.' + escapeHtml(budgetText) + '</div>';
+    content.before(progress);
+    const progressLabel = progress.querySelector("#shopProgressText");
+    const progressBar = progress.querySelector("#shopProgress");
+    const updateProgress = () => {
+      const checked = content.querySelectorAll('[data-shop]:checked').length;
+      progressLabel.textContent = "Куплено " + checked + " из " + need.length + " позиций";
+      progressBar.value = checked;
+    };
     const covered = items.filter((x) => Number(x.to_buy) <= 0.0001);
 
     const fallbackDate = (trip) =>
@@ -968,13 +985,16 @@ async function showShopping() {
       ${tripCard("thursday")}
     `;
 
+    updateProgress();
     content.querySelectorAll("[data-shop]").forEach((box) => {
       box.addEventListener("change", async () => {
         box.disabled = true;
         try {
           await api("shopping.purchase", { id: box.dataset.shop, purchased: box.checked });
+          updateProgress();
         } catch (error) {
           box.checked = !box.checked;
+          updateProgress();
           alert(error.message);
         } finally {
           box.disabled = false;
