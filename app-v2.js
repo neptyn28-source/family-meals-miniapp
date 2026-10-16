@@ -1090,9 +1090,64 @@ async function saveFeedback(event) {
   }
 }
 
+
+const todayMealOrder = ["breakfast", "snack1", "lunch", "snack2", "dinner"];
+
+async function showToday() {
+  const today = isoDate(new Date());
+  activeWeekStart = getMonday(new Date());
+  showPanel('<h2>☀️ Сегодня · ' + escapeHtml(dayTitle(today + "T12:00:00")) + '</h2><p>Твоё меню на сегодня. Открой блюдо, чтобы посмотреть порции или начать готовить.</p><div id="todayContent" class="muted">Загружаем меню…</div>');
+  const target = document.querySelector("#todayContent");
+  try {
+    const data = await api("week.get", { week_start: isoDate(activeWeekStart) });
+    if (!target.isConnected) return;
+    const meals = (data.meals || []).filter((m) => String(m.meal_date).slice(0, 10) === today);
+    if (!meals.length) {
+      target.innerHTML = '<p>На сегодня меню пока нет. Создай и загрузи меню на текущую неделю.</p><button id="todayWeekBtn">Открыть меню недели</button>';
+      document.querySelector("#todayWeekBtn").addEventListener("click", showWeek);
+      return;
+    }
+    const byType = new Map(meals.map((m) => [m.meal_type, m]));
+    target.innerHTML = todayMealOrder.map((type) => {
+      const m = byType.get(type);
+      if (!m) return '<article class="today-meal"><div class="muted">' + escapeHtml(mealTypeLabel(type)) + '</div><p>Не заполнено</p></article>';
+      const steps = Array.isArray(m.recipe?.steps) ? m.recipe.steps : [];
+      const key = today + "|" + type;
+      return '<article class="today-meal"><div class="muted">' + escapeHtml(mealTypeLabel(type)) + '</div><h3>' + escapeHtml(m.title) + '</h3>' +
+        mealDetails(m) + (steps.length ? '<button class="cook-open" data-cook="' + escapeHtml(key) + '">👩‍🍳 Готовить по шагам</button>' : '') + '</article>';
+    }).join("");
+    target.querySelectorAll("[data-cook]").forEach((btn) => btn.addEventListener("click", () => {
+      const type = btn.dataset.cook.split("|")[1];
+      const meal = byType.get(type);
+      if (meal) showCookingMode(meal);
+    }));
+  } catch (error) {
+    if (target.isConnected) target.textContent = "Не удалось загрузить меню: " + error.message;
+  }
+}
+
+function showCookingMode(meal) {
+  const recipe = meal.recipe || {};
+  const steps = Array.isArray(recipe.steps) ? recipe.steps : [];
+  if (!steps.length) return;
+  let index = 0;
+  showPanel('<div class="cook-mode"><button id="cookBack">← К сегодняшнему меню</button><h2>' + escapeHtml(meal.title) + '</h2><div id="cookProgress" class="muted"></div><div id="cookStep" class="cook-step" aria-live="polite"></div><div class="cook-controls"><button id="cookPrev">← Назад</button><button id="cookNext">Далее →</button></div><div class="subcard"><h3>Ингредиенты на всю готовку</h3><ul>' + (Array.isArray(meal.ingredients) ? meal.ingredients.map((x) => '<li>' + escapeHtml(x.name) + ' — ' + escapeHtml(amount(x.amount)) + ' ' + escapeHtml(x.unit) + '</li>').join("") : "") + '</ul></div>' + (recipe.child_adaptation ? '<p><b>Ребёнку:</b> ' + escapeHtml(recipe.child_adaptation) + '</p>' : '') + '</div>');
+  const render = () => {
+    document.querySelector("#cookProgress").textContent = "Шаг " + (index + 1) + " из " + steps.length;
+    document.querySelector("#cookStep").textContent = steps[index];
+    document.querySelector("#cookPrev").disabled = index === 0;
+    document.querySelector("#cookNext").textContent = index === steps.length - 1 ? "Готово ✓" : "Далее →";
+  };
+  document.querySelector("#cookBack").addEventListener("click", showToday);
+  document.querySelector("#cookPrev").addEventListener("click", () => { if (index > 0) { index--; render(); } });
+  document.querySelector("#cookNext").addEventListener("click", () => { if (index < steps.length - 1) { index++; render(); } else showToday(); });
+  render();
+}
+
 document.querySelectorAll(".tile").forEach((button) => {
   button.addEventListener("click", async () => {
     const action = button.dataset.action;
+    if (action === "today") return showToday();
     if (action === "inventory") return showInventory();
     if (action === "rules") return showRules();
     if (action === "profile") return showProfile();
