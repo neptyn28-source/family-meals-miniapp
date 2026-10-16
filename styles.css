@@ -108,3 +108,16 @@ body{background:var(--bg)}
 @media(hover:hover){.tile:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(28,52,37,.1)}}
 @media(max-width:560px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tile{min-height:145px;padding:13px}.tile b{font-size:15px}.tile span:not(.tile-icon){font-size:11px}}
 @media(prefers-reduced-motion:reduce){.tile{transition:none}}
+
+/* Today and distraction-free cooking */
+.today-meal{border:1px solid var(--line);border-radius:18px;padding:16px;margin:12px 0;background:var(--card)}
+.today-meal h3{margin:6px 0 12px;font-size:18px}
+.today-meal details{margin-bottom:10px}
+.cook-open,.cook-controls button,#cookBack,#todayWeekBtn{background:var(--button);color:var(--buttonText);border:0;border-radius:12px;padding:11px 14px;font-weight:700}
+.cook-mode{display:grid;gap:16px}
+.cook-mode h2{margin:0}
+.cook-step{font-size:clamp(19px,4.5vw,25px);font-weight:650;line-height:1.5;padding:24px 18px;background:color-mix(in srgb,var(--button) 8%,var(--card));border-radius:20px;min-height:180px;white-space:pre-wrap}
+.cook-controls{display:flex;gap:10px}
+.cook-controls button{flex:1}
+.cook-controls button:disabled{opacity:.35;cursor:not-allowed}
+#cookBack{justify-self:start;background:var(--card);color:var(--text);border:1px solid var(--line)}
