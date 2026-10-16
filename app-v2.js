@@ -1222,10 +1222,89 @@ function showCookingMode(meal) {
   render();
 }
 
+
+async function showFoodDiary() {
+  activeWeekStart = getMonday(new Date());
+  showPanel(weekChooser("diary", "📊 Семейный дневник", "Фактические отзывы и сытость взрослых. КБЖУ здесь не рассчитываются: для точных цифр нужны проверенные составы продуктов и съеденные порции.") + '<div id="diaryStatus" class="muted">Загружаем…</div><div id="diaryContent"></div>');
+  bindWeekNav("diary", showFoodDiaryForWeek);
+  await loadFoodDiary();
+}
+async function showFoodDiaryForWeek() { await loadFoodDiary(); }
+async function loadFoodDiary() {
+  const status = document.querySelector("#diaryStatus");
+  const content = document.querySelector("#diaryContent");
+  if (!status || !content) return;
+  status.textContent = "Загружаем…";
+  try {
+    const week = await api("week.get", { week_start: isoDate(activeWeekStart) });
+    const data = await api("feedback.list", { week_id: week.week.id });
+    if (!status.isConnected) return;
+    const mealMap = new Map((week.meals || []).map((m) => [String(m.id), m]));
+    const feedback = (data.feedback || []).filter((x) => mealMap.has(String(x.meal_id)));
+    const adults = (data.members || []).filter((m) => ["husband","wife"].includes(m.role));
+    status.textContent = weekRange(activeWeekStart) + " · " + feedback.length + " записей";
+    content.innerHTML = adults.map((person) => {
+      const rows = feedback.filter((x) => String(x.member_id) === String(person.id));
+      const rated = rows.filter((x) => x.taste);
+      const liked = rated.filter((x) => x.taste === "liked").length;
+      const satiety = rows.map((x) => Number(x.satiety)).filter((x) => Number.isFinite(x) && x > 0);
+      const average = satiety.length ? (satiety.reduce((a,b) => a+b,0)/satiety.length).toFixed(1) : "—";
+      const favorites = rows.filter((x) => x.taste === "liked").map((x) => mealMap.get(String(x.meal_id))?.title).filter(Boolean);
+      const unique = [...new Set(favorites)];
+      return '<article class="diary-person"><h3>' + escapeHtml(person.role === "wife" ? "👩 Жена" : "👨 Муж") + '</h3>' +
+        '<div class="diary-stats"><div><b>' + rows.length + '</b><span>записей</span></div><div><b>' + liked + '</b><span>понравилось</span></div><div><b>' + escapeHtml(average) + '</b><span>сытость (оценка)</span></div></div>' +
+        '<p><b>Любимые блюда:</b> ' + (unique.length ? unique.slice(0,6).map(escapeHtml).join(", ") : "пока нет оценок") + '</p></article>';
+    }).join("") + '<p class="muted">Это журнал обратной связи, а не подтверждение фактически съеденных калорий. Для внесения оценок открой раздел «Отзывы».</p><button id="diaryFeedbackBtn" class="cook-open">Оценить блюда</button>';
+    document.querySelector("#diaryFeedbackBtn").addEventListener("click", () => { activeWeekStart = getMonday(new Date()); showFeedback(); });
+  } catch (error) {
+    if (status.isConnected) status.textContent = "Ошибка дневника: " + error.message;
+  }
+}
+
+async function showMealReplacement() {
+  activeWeekStart = defaultPlanningMonday();
+  showPanel(weekChooser("replace", "🔄 Замена блюда", "Ручная замена меняет название блюда, удаляет его старый рецепт и сбрасывает проверку бюджета. После замены нужно пересобрать меню и покупки.") + '<div id="replaceStatus" class="muted">Загружаем…</div><div id="replaceContent"></div>');
+  bindWeekNav("replace", showMealReplacementForWeek);
+  await loadMealReplacement();
+}
+async function showMealReplacementForWeek() { await loadMealReplacement(); }
+async function loadMealReplacement() {
+  const status = document.querySelector("#replaceStatus");
+  const content = document.querySelector("#replaceContent");
+  if (!status || !content) return;
+  status.textContent = "Загружаем…";
+  try {
+    const data = await api("week.get", { week_start: isoDate(activeWeekStart) });
+    if (!status.isConnected) return;
+    const meals = data.meals || [];
+    status.textContent = weekRange(activeWeekStart) + " · " + meals.length + " блюд";
+    if (!meals.length) { content.innerHTML = "<p>Сначала загрузи меню на эту неделю.</p>"; return; }
+    content.innerHTML = '<div class="form-grid"><label for="replaceMeal">Что заменить</label><select id="replaceMeal" style="' + inputStyle() + '">' + meals.map((m,i) => '<option value="' + i + '">' + escapeHtml(m.meal_date) + ' · ' + escapeHtml(mealTypeLabel(m.meal_type)) + ' · ' + escapeHtml(m.title) + '</option>').join("") + '</select><label for="replaceTitle">Новое блюдо</label><input id="replaceTitle" maxlength="160" placeholder="Название нового блюда" style="' + inputStyle() + '"><p class="muted">Важно: это ручная правка без рецепта и пересчёта ингредиентов. Воскресенье остаётся днём кафе.</p><button id="replaceSave" class="cook-open">Заменить и сбросить проверку недели</button><div id="replaceResult" role="status"></div></div>';
+    const button = document.querySelector("#replaceSave");
+    button.addEventListener("click", async () => {
+      const meal = meals[Number(document.querySelector("#replaceMeal").value)];
+      const title = document.querySelector("#replaceTitle").value.trim();
+      const result = document.querySelector("#replaceResult");
+      if (!meal || !title) { result.textContent = "Выбери блюдо и введи название."; return; }
+      if (new Date(String(meal.meal_date).slice(0,10) + "T12:00:00").getDay() === 0) { result.textContent = "Воскресенье — кафе, домашние блюда здесь не меняем."; return; }
+      if (!window.confirm("Рецепт и ингредиенты будут очищены, а бюджет и проверки недели сброшены. Продолжить?")) return;
+      button.disabled = true;
+      result.textContent = "Сохраняем…";
+      try {
+        await api("week.meal.save", { week_id: data.week.id, meal_date: String(meal.meal_date).slice(0,10), meal_type: meal.meal_type, title });
+        result.textContent = "Замена сохранена. Обязательно пересобери меню и список покупок.";
+      } catch (error) { result.textContent = "Ошибка: " + error.message; }
+      finally { button.disabled = false; }
+    });
+  } catch (error) { if (status.isConnected) status.textContent = "Ошибка: " + error.message; }
+}
+
 document.querySelectorAll(".tile").forEach((button) => {
   button.addEventListener("click", async () => {
     const action = button.dataset.action;
     if (action === "today") return showToday();
+    if (action === "insights") return showFoodDiary();
+    if (action === "replace") return showMealReplacement();
     if (action === "inventory") return showInventory();
     if (action === "rules") return showRules();
     if (action === "profile") return showProfile();
