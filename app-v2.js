@@ -51,6 +51,7 @@ function buttonStyle(extra = "") {
 }
 
 function showPanel(html) {
+  stopCookingTimer();
   placeholder.classList.remove("hidden");
   placeholder.innerHTML = html;
   placeholder.scrollIntoView({ behavior: "smooth", block: "start" });
