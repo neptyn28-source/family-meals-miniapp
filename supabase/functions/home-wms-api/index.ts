@@ -204,10 +204,22 @@ async function main(req: Request) {
         position: position(r.position),
         no_shelves: r.no_shelves === true,
       }));
-      const moduleFlags = rows(payload.module_flags).map((r) => ({
-        id: uuid(r.id),
-        no_shelves: r.no_shelves === true,
-      }));
+      // Изменения уже записанной мебели: деление на секции меняет название и порядок.
+      // module_flags — прежний формат (только «нет полок»), его шлют старые версии приложения.
+      const moduleUpdates = [
+        ...rows(payload.module_updates).map((r) => ({
+          id: uuid(r.id),
+          patch: {
+            name: text(r.name, 80),
+            position: position(r.position),
+            no_shelves: r.no_shelves === true,
+          } as Record<string, unknown>,
+        })),
+        ...rows(payload.module_flags).map((r) => ({
+          id: uuid(r.id),
+          patch: { no_shelves: r.no_shelves === true } as Record<string, unknown>,
+        })),
+      ];
       const cells = rows(payload.cells).map((r) => ({
         id: uuid(r.id),
         family_id: familyId,
@@ -254,13 +266,13 @@ async function main(req: Request) {
         const { error } = await db.from(table).upsert(batch, { onConflict: "id", ignoreDuplicates: true });
         if (error) throw error;
       }
-      // Отметка «нет полок» у уже сохранённой мебели; чужая мебель не найдётся по family_id.
-      for (const flag of moduleFlags) {
+      // Чужая мебель не найдётся по family_id — обновление просто ничего не тронет.
+      for (const update of moduleUpdates) {
         const { error } = await db
           .from("wms_modules")
-          .update({ no_shelves: flag.no_shelves })
+          .update(update.patch)
           .eq("family_id", familyId)
-          .eq("id", flag.id);
+          .eq("id", update.id);
         if (error) throw error;
       }
       return reply({ ok: true });
