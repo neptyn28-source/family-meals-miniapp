@@ -74,7 +74,13 @@ type CellRow = {
   zone_type: string;
   position: number;
 };
-type ModuleRow = { id: string; name: string; position: number; wms_cells: CellRow[] };
+type ModuleRow = {
+  id: string;
+  name: string;
+  position: number;
+  no_shelves: boolean;
+  wms_cells: CellRow[];
+};
 type LocationRow = { id: string; name: string; position: number; wms_modules: ModuleRow[] };
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
@@ -158,7 +164,7 @@ async function main(req: Request) {
       const { data, error } = await db
         .from("wms_locations")
         .select(
-          "id, name, position, wms_modules(id, name, position, wms_cells(id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, position))",
+          "id, name, position, wms_modules(id, name, position, no_shelves, wms_cells(id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, position))",
         )
         .eq("family_id", familyId);
       if (error) throw error;
@@ -168,6 +174,7 @@ async function main(req: Request) {
         modules: l.wms_modules.sort(byPosition).map((m) => ({
           id: m.id,
           name: m.name,
+          noShelves: m.no_shelves,
           cells: m.wms_cells.sort(byPosition).map((c) => ({
             id: c.id,
             label: c.label,
@@ -195,6 +202,11 @@ async function main(req: Request) {
         location_id: uuid(r.location_id),
         name: text(r.name, 80),
         position: position(r.position),
+        no_shelves: r.no_shelves === true,
+      }));
+      const moduleFlags = rows(payload.module_flags).map((r) => ({
+        id: uuid(r.id),
+        no_shelves: r.no_shelves === true,
       }));
       const cells = rows(payload.cells).map((r) => ({
         id: uuid(r.id),
@@ -242,11 +254,31 @@ async function main(req: Request) {
         const { error } = await db.from(table).upsert(batch, { onConflict: "id", ignoreDuplicates: true });
         if (error) throw error;
       }
+      // Отметка «нет полок» у уже сохранённой мебели; чужая мебель не найдётся по family_id.
+      for (const flag of moduleFlags) {
+        const { error } = await db
+          .from("wms_modules")
+          .update({ no_shelves: flag.no_shelves })
+          .eq("family_id", familyId)
+          .eq("id", flag.id);
+        if (error) throw error;
+      }
       return reply({ ok: true });
     }
 
     if (action === "wms.clear") {
       const { error } = await db.from("wms_locations").delete().eq("family_id", familyId);
+      if (error) throw error;
+      return reply({ ok: true });
+    }
+
+    if (action === "wms.cells.clear") {
+      // Вещи на этих полках не теряются: cell_id обнуляется внешним ключом.
+      const { error } = await db
+        .from("wms_cells")
+        .delete()
+        .eq("family_id", familyId)
+        .eq("module_id", uuid(payload.module_id));
       if (error) throw error;
       return reply({ ok: true });
     }
