@@ -163,6 +163,17 @@ async function main(req: Request) {
         return fail(410, "invite_expired", "Срок действия кода истёк.");
       }
 
+      // Claim the code first: of two people using it at once only one gets the row back.
+      const nowIso = new Date().toISOString();
+      const claimed = await db.from("family_invites")
+        .update({ used_at: nowIso })
+        .eq("id", invite.id)
+        .is("used_at", null)
+        .gt("expires_at", nowIso)
+        .select("id");
+      if (claimed.error) throw claimed.error;
+      if (!claimed.data?.length) return fail(409, "invite_used", "Этот код уже использован.");
+
       const joined = await db.from("family_members").insert({
         family_id: invite.family_id,
         telegram_user_id: auth.user.id,
@@ -170,19 +181,26 @@ async function main(req: Request) {
         role: invite.role || "wife",
         active: true,
       }).select("*").single();
-      if (joined.error) throw joined.error;
-
-      const marked = await db.from("family_invites")
-        .update({ used_at: new Date().toISOString() })
-        .eq("id", invite.id)
-        .is("used_at", null);
-      if (marked.error) throw marked.error;
+      if (joined.error) {
+        // give the code back so it can be used again
+        await db.from("family_invites").update({ used_at: null }).eq("id", invite.id).eq("used_at", nowIso);
+        if (joined.error.code === "23505") {
+          return fail(409, "member_inactive", "Этот аккаунт уже был в семье и отключён. Попросите мужа включить его снова.");
+        }
+        throw joined.error;
+      }
 
       return reply({ ok: true, joined: true, member: joined.data, telegram_user: auth.user });
     }
 
-    // Preserve first-user bootstrap behavior.
+    // First-user bootstrap: only for the Telegram account named in the BOOTSTRAP_TELEGRAM_USER_ID
+    // secret and only while there are no members at all. Otherwise any bot user who came first
+    // would become the husband of the oldest family.
     if (!member) {
+      const bootstrapId = Number(Deno.env.get("BOOTSTRAP_TELEGRAM_USER_ID") ?? "");
+      if (!Number.isSafeInteger(bootstrapId) || bootstrapId !== auth.user.id) {
+        return fail(403, "not_invited", "Вы пока не добавлены в семью.");
+      }
       const count = await db.from("family_members").select("*", { count: "exact", head: true });
       if (count.error) throw count.error;
       if ((count.count ?? 0) > 0) {
