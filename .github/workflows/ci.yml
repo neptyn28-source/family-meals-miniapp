@@ -24,13 +24,9 @@ jobs:
       - name: Type-check Edge Functions and shared code
         run: |
           deno check \
-            supabase/functions/family-api/index.ts \
-            supabase/functions/ai-menu-api/index.ts \
-            supabase/functions/week-generate/index.ts \
-            supabase/functions/_shared/ai-menu.ts \
-            supabase/functions/_shared/planner/planner.ts \
-            supabase/functions/_shared/telegram.ts \
-            supabase/functions/_shared/scope.ts
+            supabase/functions/*/index.ts \
+            supabase/functions/_shared/*.ts \
+            supabase/functions/_shared/planner/*.ts
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
         env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
