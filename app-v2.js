@@ -20,6 +20,13 @@ if (tg) {
   tg.expand();
 }
 
+// "72,5" and "72.5" are both 72.5; empty input is null (not 0), garbage is NaN.
+function parseDecimal(raw) {
+  const text = String(raw ?? "").trim().replace(/\s+/g, "").replace(",", ".");
+  if (text === "") return null;
+  return /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : NaN;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -285,7 +292,7 @@ async function showInventory() {
     <p>Записывай фактическое состояние продукта. Если остаток нельзя подавать напрямую, отметь «только в готовку» — это попадёт в отчёт для ChatGPT и будет учитываться при расчёте покупок.</p>
     <div class="form-grid">
       <input id="invName" placeholder="Продукт" style="${inputStyle()}">
-      <input id="invQty" type="number" min="0" step="0.01" placeholder="Количество" style="${inputStyle()}">
+      <input id="invQty" type="text" inputmode="decimal" autocomplete="off" placeholder="Количество" style="${inputStyle()}">
       <select id="invUnit" style="${inputStyle()}">
         <option value="g">г</option><option value="ml">мл</option><option value="pcs">шт</option>
       </select>
@@ -401,8 +408,8 @@ async function loadInventory() {
 
 async function saveInventoryItem() {
   const name = document.querySelector("#invName").value.trim();
-  const quantity = Number(document.querySelector("#invQty").value);
-  if (!name || !Number.isFinite(quantity) || quantity < 0) {
+  const quantity = parseDecimal(document.querySelector("#invQty").value);
+  if (!name || quantity === null || !Number.isFinite(quantity) || quantity < 0) {
     alert("Укажи продукт и корректное количество.");
     return;
   }
@@ -538,7 +545,7 @@ async function showProfile() {
       <div class="subcard" style="margin-top:12px">
         <h3 style="margin-top:0">Ребёнок</h3>
         <label>Возраст, лет
-          <input id="childAge" type="number" min="0" max="18" step="0.1" value="${escapeHtml(p.child?.age_years ?? "")}" style="${inputStyle("margin-top:4px")}">
+          <input id="childAge" type="text" inputmode="decimal" autocomplete="off" value="${escapeHtml(p.child?.age_years ?? "")}" style="${inputStyle("margin-top:4px")}">
         </label>
       </div>
 
@@ -574,10 +581,10 @@ function personProfileHtml(key, label, data) {
     <div class="subcard">
       <h3 style="margin-top:0">${label}</h3>
       <label>Вес, кг
-        <input id="${key}Weight" type="number" min="1" max="400" step="0.1" value="${escapeHtml(data?.weight_kg ?? "")}" style="${inputStyle("margin-top:4px")}">
+        <input id="${key}Weight" type="text" inputmode="decimal" autocomplete="off" value="${escapeHtml(data?.weight_kg ?? "")}" style="${inputStyle("margin-top:4px")}">
       </label>
       <label>Рост, см <span class="muted">(необязательно)</span>
-        <input id="${key}Height" type="number" min="50" max="260" step="0.1" value="${escapeHtml(data?.height_cm ?? "")}" style="${inputStyle("margin-top:4px")}">
+        <input id="${key}Height" type="text" inputmode="decimal" autocomplete="off" value="${escapeHtml(data?.height_cm ?? "")}" style="${inputStyle("margin-top:4px")}">
       </label>
       <h4>Расчёт нормы калорий</h4>
       <label>Возраст, лет <input id="${key}Age" type="number" min="18" max="100" value="${escapeHtml(data?.age_years ?? "")}" style="${inputStyle("margin-top:4px")}"></label>
@@ -610,13 +617,22 @@ async function saveProfile() {
   const save = document.querySelector("#profileSave");
   const status = document.querySelector("#profileSaveStatus");
   const val = (id) => document.querySelector(id).value;
-  const numOrNull = (id) => val(id) === "" ? null : Number(val(id));
+  const numOrNull = (id) => parseDecimal(val(id));
+
+  const numbers = ["#husbandWeight", "#husbandHeight", "#husbandAge", "#husbandSteps", "#wifeWeight",
+    "#wifeHeight", "#wifeAge", "#wifeSteps", "#childAge"];
+  if (numbers.some((id) => Number.isNaN(numOrNull(id)))) {
+    status.textContent = "Проверьте числа: вес, рост, возраст и шаги — только цифры, дробь через запятую.";
+    return;
+  }
 
   save.disabled = true;
   status.textContent = "Сохраняем…";
+  let profileSaved = false;
   try {
-    await Promise.all([
-      aiApi("profile.update", {
+    // One after another: both requests rewrite the same family_settings row, in parallel
+    // the later write could roll back the other one.
+    await aiApi("profile.update", {
         husband: {
           weight_kg: numOrNull("#husbandWeight"),
           height_cm: numOrNull("#husbandHeight"),
@@ -640,18 +656,20 @@ async function saveProfile() {
           special_circumstances: val("#wifeSpecial"),
         },
         child: { age_years: numOrNull("#childAge") },
-      }),
-      api("settings.update", {
-        settings: {
-          weekly_budget_rub: Number(val("#familyBudget")),
-          wife_snacks: Number(val("#wifeSnacks")),
-          husband_snacks: Number(val("#husbandSnacks")),
-        },
-      }),
-    ]);
+    });
+    profileSaved = true;
+    await api("settings.update", {
+      settings: {
+        weekly_budget_rub: Number(val("#familyBudget")),
+        wife_snacks: Number(val("#wifeSnacks")),
+        husband_snacks: Number(val("#husbandSnacks")),
+      },
+    });
     status.textContent = "Сохранено.";
   } catch (error) {
-    status.textContent = "Ошибка: " + error.message;
+    status.textContent = profileSaved
+      ? "Вес и цели сохранены, а бюджет и перекусы — нет: " + error.message
+      : "Ошибка: " + error.message;
   } finally {
     save.disabled = false;
   }
