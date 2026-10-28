@@ -1,5 +1,3 @@
--- Safeguard retail pack sizes and prevent fractional fruit purchases.
--- Activia drink with grains is sold in 870 g bottles; unknown store/price stay null.
 create or replace function public.normalize_shopping_retail_pack()
 returns trigger language plpgsql set search_path = public as $$
 declare
@@ -10,7 +8,7 @@ begin
     if new.unit <> 'g' then
       raise exception 'Активия со злаками должна учитываться в граммах, получено %', new.unit;
     end if;
-    if (new.package_quantity is distinct from 870 or new.packages is null) and new.shopping_trip = 'thursday' then
+    if new.shopping_trip = 'thursday' then
       select greatest(0, coalesce(sum(purchase_quantity - to_buy),0))
       into prior_surplus
       from public.weekly_shopping_items
@@ -32,7 +30,6 @@ begin
   end if;
   return new;
 end $$;
-
 drop trigger if exists trg_normalize_shopping_retail_pack on public.weekly_shopping_items;
 create trigger trg_normalize_shopping_retail_pack
 before insert on public.weekly_shopping_items
