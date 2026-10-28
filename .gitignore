@@ -5,3 +5,4 @@ supabase/.temp/
 supabase/.branches/
 *.log
 supabase/seed.sql
+deno.lock

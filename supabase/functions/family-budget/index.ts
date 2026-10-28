@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
+import { errorBody, HttpError, SERVER_ERROR_TEXT } from "../_shared/http.ts";
 const keys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") || "{}");
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -16,6 +17,11 @@ const J = (x: any, s = 200) =>
     status: s,
     headers: { ...C, "content-type": "application/json; charset=utf-8" },
   });
+// Errors in the shared format {ok:false, error, code}; database details stay in the logs.
+const F = (s: number, code: string, error: string) => J(errorBody(code, error), s);
+const must = (r: { error: unknown }) => {
+  if (r.error) throw r.error;
+};
 const H = async (s: string) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))]
     .map((x) => x.toString(16).padStart(2, "0"))
@@ -124,6 +130,14 @@ async function seed(h: string, m: string, role: string) {
   );
   await db.from("fb_template_rules").insert(R);
 }
+// Balances over all live operations (the history list below shows only the latest 80).
+async function balances(household: string): Promise<Record<string, number>> {
+  let { data, error } = await db.rpc("fb_envelope_balances", { p_household_id: household });
+  if (error) throw error;
+  let b: Record<string, number> = {};
+  (data || []).forEach((x: any) => (b[x.envelope_id] = Number(x.balance)));
+  return b;
+}
 async function state(m: any) {
   let [{ data: h }, { data: E }, { data: O }] = await Promise.all([
     db.from("fb_households").select("name,invite_code").eq("id", m.household_id).single(),
@@ -141,8 +155,7 @@ async function state(m: any) {
       .order("created_at", { ascending: false })
       .limit(80),
   ]);
-  let b: any = {};
-  (O || []).forEach((o: any) => (b[o.envelope_id] = (b[o.envelope_id] || 0) + Number(o.amount)));
+  let b = await balances(m.household_id);
   let e = (E || []).map((x: any) => ({ ...x, balance: b[x.id] || 0, private_other: false }));
   return {
     ok: true,
@@ -166,21 +179,24 @@ async function api(r: Request) {
     return m ? J(await state(m)) : J({ ok: true, setup: true });
   }
   if (a === "create") {
-    let t = r.headers.get("x-device-token") || "",
-      hh = await H(t),
+    let t = r.headers.get("x-device-token") || "";
+    if (t.length < 20)
+      return F(400, "bad_device_token", "Не удалось создать ключ устройства. Обновите страницу.");
+    let hh = await H(t),
       c = code(),
-      { data: h } = await db
+      { data: h, error: hError } = await db
         .from("fb_households")
         .insert({ name: q.family || "Наша семья", invite_code: c })
         .select()
         .single(),
-      role = q.role === "wife" ? "wife" : "husband",
-      { data: m, error } = await db
-        .from("fb_members")
-        .insert({ household_id: h.id, display_name: q.name || "Я", role, device_token_hash: hh })
-        .select()
-        .single();
-    if (error) return J({ ok: false, error: error.message }, 400);
+      role = q.role === "wife" ? "wife" : "husband";
+    if (hError || !h) throw hError || new Error("household insert returned no row");
+    let { data: m, error } = await db
+      .from("fb_members")
+      .insert({ household_id: h.id, display_name: q.name || "Я", role, device_token_hash: hh })
+      .select()
+      .single();
+    if (error) throw error;
     await seed(h.id, m.id, role);
     return J(await state(m));
   }
@@ -190,9 +206,9 @@ async function api(r: Request) {
       .select("*")
       .eq("invite_code", String(q.code || "").toUpperCase())
       .maybeSingle();
-    if (!h) return J({ ok: false, error: "Код не найден" }, 404);
+    if (!h) return F(404, "code_not_found", "Код не найден");
     let { data: ms } = await db.from("fb_members").select("role").eq("household_id", h.id);
-    if ((ms || []).length >= 2) return J({ ok: false, error: "В семье уже два участника" }, 400);
+    if ((ms || []).length >= 2) return F(400, "household_full", "В семье уже два участника");
     let role = (ms || []).some((x: any) => x.role === "husband") ? "wife" : "husband",
       { data: m, error } = await db
         .from("fb_members")
@@ -204,7 +220,7 @@ async function api(r: Request) {
         })
         .select()
         .single();
-    if (error) return J({ ok: false, error: error.message }, 400);
+    if (error) throw error;
     await db
       .from("fb_envelopes")
       .update({ owner_member_id: m.id })
@@ -213,25 +229,24 @@ async function api(r: Request) {
     return J(await state(m));
   }
   let m = await member(r);
-  if (!m) return J({ ok: false, error: "Нет сессии" }, 401);
+  if (!m) return F(401, "no_session", "Нет сессии");
   if (a === "join_existing") {
     let codeValue = String(q.code || "")
       .trim()
       .toUpperCase();
-    if (!/^[A-Z2-9]{7}$/.test(codeValue))
-      return J({ ok: false, error: "Введите код семьи из 7 символов" }, 400);
+    if (!/^[A-Z2-9]{7}$/.test(codeValue)) return F(400, "bad_code", "Введите код семьи из 7 символов");
     let { data: target } = await db
       .from("fb_households")
       .select("id")
       .eq("invite_code", codeValue)
       .maybeSingle();
-    if (!target) return J({ ok: false, error: "Код семьи не найден" }, 404);
+    if (!target) return F(404, "code_not_found", "Код семьи не найден");
     if (target.id === m.household_id) return J(await state(m));
     let { count: membersCount } = await db
       .from("fb_members")
       .select("id", { count: "exact", head: true })
       .eq("household_id", target.id);
-    if ((membersCount || 0) >= 2) return J({ ok: false, error: "В целевой семье уже два участника" }, 400);
+    if ((membersCount || 0) >= 2) return F(400, "household_full", "В целевой семье уже два участника");
     let { count: operationsCount } = await db
       .from("fb_operations")
       .select("id", { count: "exact", head: true })
@@ -241,13 +256,10 @@ async function api(r: Request) {
       .select("id", { count: "exact", head: true })
       .eq("household_id", m.household_id);
     if ((operationsCount || 0) > 0 || sourceMembers !== 1)
-      return J(
-        {
-          ok: false,
-          error:
-            "В текущей семье есть данные или другие участники. Автоматический переход заблокирован, чтобы не потерять историю. Обратитесь для безопасного переноса.",
-        },
+      return F(
         409,
+        "household_has_data",
+        "В текущей семье есть данные или другие участники. Автоматический переход заблокирован, чтобы не потерять историю. Обратитесь для безопасного переноса.",
       );
     let { data: existing } = await db.from("fb_members").select("role").eq("household_id", target.id);
     let role = (existing || []).some((x: any) => x.role === "husband") ? "wife" : "husband";
@@ -256,7 +268,7 @@ async function api(r: Request) {
       .update({ household_id: target.id, role })
       .eq("id", m.id)
       .eq("household_id", m.household_id);
-    if (error) return J({ ok: false, error: error.message }, 500);
+    if (error) throw error;
     await db
       .from("fb_envelopes")
       .update({ owner_member_id: m.id })
@@ -277,7 +289,7 @@ async function api(r: Request) {
       group.length > 80 ||
       !["payment", "limit", "personal", "goal"].includes(type)
     )
-      return J({ ok: false, error: "Проверьте название, группу и тип" }, 400);
+      return F(400, "bad_envelope", "Проверьте название, группу и тип");
     let plan = q.plan,
       goal = q.goal;
     if (
@@ -288,7 +300,7 @@ async function api(r: Request) {
       goal < 0 ||
       goal > 100000000000
     )
-      return J({ ok: false, error: "Некорректный план или цель" }, 400);
+      return F(400, "bad_plan", "Некорректный план или цель");
     let payload: any = { name, group_name: group, type, plan_amount: plan, goal_amount: goal };
     let result;
     if (q.id) {
@@ -301,7 +313,8 @@ async function api(r: Request) {
         .eq("status", "active")
         .select("id")
         .maybeSingle();
-      if (!result.data) return J({ ok: false, error: result.error?.message || "Конверт не найден" }, 404);
+      if (result.error) throw result.error;
+      if (!result.data) return F(404, "envelope_not_found", "Конверт не найден");
     } else {
       let { data: last } = await db
         .from("fb_envelopes")
@@ -313,13 +326,17 @@ async function api(r: Request) {
       payload.status = "active";
       payload.sort = (last?.[0]?.sort || 0) + 1;
       result = await db.from("fb_envelopes").insert(payload);
-      if (result.error) return J({ ok: false, error: result.error.message }, 400);
+      if (result.error) {
+        if ((result.error as any).code === "23505")
+          return F(409, "envelope_exists", "Конверт с таким названием уже есть");
+        throw result.error;
+      }
     }
     return J(await state(m));
   }
   if (a === "envelope_adjust") {
     if (!q.id || !Number.isSafeInteger(q.balance) || Math.abs(q.balance) > 100000000000)
-      return J({ ok: false, error: "Некорректный остаток" }, 400);
+      return F(400, "bad_balance", "Некорректный остаток");
     let { data: e } = await db
       .from("fb_envelopes")
       .select("id,type")
@@ -327,28 +344,19 @@ async function api(r: Request) {
       .eq("household_id", m.household_id)
       .eq("status", "active")
       .maybeSingle();
-    if (!e || e.type === "system") return J({ ok: false, error: "Конверт не найден" }, 404);
-    let { data: rows, error: readError } = await db
-      .from("fb_operations")
-      .select("amount")
-      .eq("household_id", m.household_id)
-      .eq("envelope_id", q.id)
-      .is("deleted_at", null);
-    if (readError) return J({ ok: false, error: readError.message }, 500);
-    let current = (rows || []).reduce((n: number, o: any) => n + Number(o.amount), 0),
+    if (!e || e.type === "system") return F(404, "envelope_not_found", "Конверт не найден");
+    let current = (await balances(m.household_id))[q.id] || 0,
       delta = q.balance - current;
     if (delta) {
-      let { error } = await db
-        .from("fb_operations")
-        .insert({
-          household_id: m.household_id,
-          envelope_id: q.id,
-          amount: delta,
-          kind: "adjustment",
-          member_id: m.id,
-          comment: String(q.comment || "Сверка фактического остатка").slice(0, 300),
-        });
-      if (error) return J({ ok: false, error: error.message }, 500);
+      let { error } = await db.from("fb_operations").insert({
+        household_id: m.household_id,
+        envelope_id: q.id,
+        amount: delta,
+        kind: "adjustment",
+        member_id: m.id,
+        comment: String(q.comment || "Сверка фактического остатка").slice(0, 300),
+      });
+      if (error) throw error;
     }
     return J(await state(m));
   }
@@ -360,98 +368,99 @@ async function api(r: Request) {
       .eq("household_id", m.household_id)
       .eq("status", "active")
       .maybeSingle();
-    if (!e || e.type === "system") return J({ ok: false, error: "Конверт не найден" }, 404);
-    let { data: rows } = await db
-      .from("fb_operations")
-      .select("amount")
-      .eq("household_id", m.household_id)
-      .eq("envelope_id", q.id)
-      .is("deleted_at", null);
-    if ((rows || []).reduce((n: number, o: any) => n + Number(o.amount), 0) !== 0)
-      return J({ ok: false, error: "Сначала переведите остаток в другой конверт" }, 400);
+    if (!e || e.type === "system") return F(404, "envelope_not_found", "Конверт не найден");
+    if (((await balances(m.household_id))[q.id] || 0) !== 0)
+      return F(400, "envelope_not_empty", "Сначала переведите остаток в другой конверт");
     let { error } = await db
       .from("fb_envelopes")
       .update({ status: "archived" })
       .eq("id", q.id)
       .eq("household_id", m.household_id);
-    if (error) return J({ ok: false, error: error.message }, 500);
+    if (error) throw error;
     return J(await state(m));
   }
   if (a === "expense") {
-    if (!validAmount(q.v)) return J({ ok: false, error: "Некорректная сумма" }, 400);
+    if (!validAmount(q.v)) return F(400, "bad_amount", "Некорректная сумма");
     let { data: e } = await db
       .from("fb_envelopes")
       .select("*")
       .eq("id", q.e)
       .eq("household_id", m.household_id)
-      .single();
-    if (!e || e.type === "system") return J({ ok: false, error: "Конверт недоступен" }, 400);
-    await db
-      .from("fb_operations")
-      .insert({
+      .eq("status", "active")
+      .maybeSingle();
+    if (!e || e.type === "system") return F(400, "envelope_unavailable", "Конверт недоступен");
+    must(
+      await db.from("fb_operations").insert({
         household_id: m.household_id,
         envelope_id: e.id,
         amount: -Number(q.v),
         kind: "expense",
         member_id: m.id,
-        comment: q.c || null,
-      });
+        comment: q.c ? String(q.c).slice(0, 300) : null,
+      }),
+    );
     return J(await state(m));
   }
   if (a === "personal") {
-    if (!validAmount(q.v)) return J({ ok: false, error: "Некорректная сумма" }, 400);
+    if (!validAmount(q.v)) return F(400, "bad_amount", "Некорректная сумма");
     let { data: e } = await db
       .from("fb_envelopes")
       .select("id")
       .eq("household_id", m.household_id)
       .eq("type", "personal")
       .eq("owner_member_id", m.id)
-      .single();
-    await db
-      .from("fb_operations")
-      .insert({
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle();
+    if (!e) return F(400, "no_personal_envelope", "Личный конверт не найден");
+    must(
+      await db.from("fb_operations").insert({
         household_id: m.household_id,
         envelope_id: e.id,
         amount: Number(q.v),
         kind: "personal_income",
         member_id: m.id,
-        comment: q.c || "Мой доход",
-      });
+        comment: q.c ? String(q.c).slice(0, 300) : "Мой доход",
+      }),
+    );
     return J(await state(m));
   }
   if (a === "transfer") {
     let v = Number(q.v);
-    if (!validAmount(q.v) || q.from === q.to) return J({ ok: false, error: "Некорректный перевод" }, 400);
+    if (!validAmount(q.v) || q.from === q.to) return F(400, "bad_transfer", "Некорректный перевод");
     let { data: es } = await db
       .from("fb_envelopes")
       .select("id,type,owner_member_id")
       .eq("household_id", m.household_id)
+      .eq("status", "active")
       .in("id", [q.from, q.to]);
-    if (!es || es.length !== 2) return J({ ok: false, error: "Конверт не найден" }, 404);
+    if (!es || es.length !== 2) return F(404, "envelope_not_found", "Конверт не найден");
     let g = crypto.randomUUID();
-    await db.from("fb_operations").insert([
-      {
-        household_id: m.household_id,
-        envelope_id: q.from,
-        amount: -v,
-        kind: "transfer_out",
-        member_id: m.id,
-        transfer_group_id: g,
-      },
-      {
-        household_id: m.household_id,
-        envelope_id: q.to,
-        amount: v,
-        kind: "transfer_in",
-        member_id: m.id,
-        transfer_group_id: g,
-      },
-    ]);
+    must(
+      await db.from("fb_operations").insert([
+        {
+          household_id: m.household_id,
+          envelope_id: q.from,
+          amount: -v,
+          kind: "transfer_out",
+          member_id: m.id,
+          transfer_group_id: g,
+        },
+        {
+          household_id: m.household_id,
+          envelope_id: q.to,
+          amount: v,
+          kind: "transfer_in",
+          member_id: m.id,
+          transfer_group_id: g,
+        },
+      ]),
+    );
     return J(await state(m));
   }
   if (a === "income") {
     if (!validAmount(q.v) || !["advance", "salary", "bonus"].includes(q.kind))
-      return J({ ok: false, error: "Некорректный доход" }, 400);
+      return F(400, "bad_income", "Некорректный доход");
     let { data: u } = await db
       .from("fb_envelopes")
       .select("id")
@@ -459,29 +468,31 @@ async function api(r: Request) {
       .eq("name", "Нераспределённые")
       .eq("type", "system")
       .maybeSingle();
-    if (!u) return J({ ok: false, error: "Системный конверт не найден" }, 500);
+    if (!u) return F(500, "no_system_envelope", "Системный конверт не найден");
     let { data: ie, error: ieError } = await db
       .from("fb_income_events")
       .insert({ household_id: m.household_id, kind: q.kind, amount: q.v, member_id: m.id })
       .select()
       .single();
-    if (ieError) return J({ ok: false, error: ieError.message }, 500);
-    let { error } = await db
-      .from("fb_operations")
-      .insert({
-        household_id: m.household_id,
-        envelope_id: u.id,
-        amount: q.v,
-        kind: "income_unallocated",
-        member_id: m.id,
-        income_event_id: ie.id,
-        comment: "Доход получен; распределите вручную",
-      });
-    if (error) return J({ ok: false, error: error.message }, 500);
+    if (ieError) throw ieError;
+    let { error } = await db.from("fb_operations").insert({
+      household_id: m.household_id,
+      envelope_id: u.id,
+      amount: q.v,
+      kind: "income_unallocated",
+      member_id: m.id,
+      income_event_id: ie.id,
+      comment: "Доход получен; распределите вручную",
+    });
+    if (error) {
+      // no dangling income event without its operation
+      await db.from("fb_income_events").delete().eq("id", ie.id).eq("household_id", m.household_id);
+      throw error;
+    }
     return J(await state(m));
   }
   if (a === "fund") {
-    if (!validAmount(q.v)) return J({ ok: false, error: "Некорректная сумма" }, 400);
+    if (!validAmount(q.v)) return F(400, "bad_amount", "Некорректная сумма");
     let { data: es } = await db
       .from("fb_envelopes")
       .select("id,type")
@@ -494,7 +505,9 @@ async function api(r: Request) {
       !es.some((e: any) => e.id === q.from && e.type === "system") ||
       !es.some((e: any) => e.id === q.to && e.type !== "system")
     )
-      return J({ ok: false, error: "Выберите источник и конверт" }, 400);
+      return F(400, "bad_fund", "Выберите источник и конверт");
+    if (((await balances(m.household_id))[q.from] || 0) < q.v)
+      return F(400, "not_enough_unallocated", "В «Нераспределённых» не хватает денег");
     let g = crypto.randomUUID(),
       { error } = await db.from("fb_operations").insert([
         {
@@ -514,15 +527,24 @@ async function api(r: Request) {
           transfer_group_id: g,
         },
       ]);
-    if (error) return J({ ok: false, error: error.message }, 500);
+    if (error) throw error;
     return J(await state(m));
   }
-  return J({ ok: false, error: "bad action" }, 400);
+  return F(400, "unknown_action", "Неизвестное действие");
+}
+async function handle(r: Request) {
+  try {
+    return await api(r);
+  } catch (err) {
+    if (err instanceof HttpError) return F(err.status, err.code, err.message);
+    console.error(err);
+    return F(500, "server_error", SERVER_ERROR_TEXT);
+  }
 }
 Deno.serve((r: Request) =>
   r.method === "OPTIONS"
     ? new Response(null, { status: 204, headers: C })
     : r.method === "GET"
       ? J({ ok: true, service: "family-budget-api" })
-      : api(r),
+      : handle(r),
 );
