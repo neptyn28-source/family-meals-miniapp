@@ -576,22 +576,14 @@ async function main(req: Request) {
         throw error;
       }
 
-      let weekR = await db.from("weekly_plans")
-        .select("*")
+      const weekR = await db.from("weekly_plans")
+        .select("id")
         .eq("family_id", familyId)
         .eq("week_start", plan.week_start)
         .maybeSingle();
       if (weekR.error) throw weekR.error;
-      if (!weekR.data) {
-        weekR = await db.from("weekly_plans").insert({
-          family_id: familyId,
-          week_start: plan.week_start,
-          status: "draft",
-        }).select("*").single();
-        if (weekR.error) throw weekR.error;
-      }
-      const week = weekR.data;
-      const weekId = String(week.id);
+      // A new week is created only by ai_import_week, so a rejected import leaves nothing behind.
+      const weekId = weekR.data ? String(weekR.data.id) : crypto.randomUUID();
       const settings = await settingsRow();
 
       const shopping = await calculateShopping({
@@ -671,60 +663,40 @@ async function main(req: Request) {
         }
       }
 
-      const mealUpsert = await db.from("weekly_meals").upsert(mealRows, {
-        onConflict: "week_id,meal_date,meal_type",
+      // One transaction: meals, cook blocks, shopping, audit and the week are saved together or not at all.
+      const saved = await db.rpc("ai_import_week", {
+        p_family_id: familyId,
+        p_week_id: weekId,
+        p_week_start: plan.week_start,
+        p_meals: mealRows,
+        p_blocks: plan.cook_blocks.map((b) => ({
+          block_key: b.id,
+          title: b.title,
+          serves: b.serves,
+          ingredients: b.ingredients,
+          recipe: b.recipe,
+        })),
+        p_shopping: shopping.rows,
+        p_import: { schema_version: AI_MENU_FORMAT, payload: plan, imported_by: member.id },
+        p_week_patch: {
+          status: "draft",
+          validation_ok: true,
+          estimated_cost: shopping.estimated_cost_rub,
+          budget_status: shopping.budget_status,
+          ai_import_version: AI_MENU_FORMAT,
+          notes: plan.summary || "Меню импортировано из ChatGPT. Покупки рассчитаны ботом.",
+        },
       });
-      if (mealUpsert.error) throw mealUpsert.error;
-
-      const clearBlocks = await db.from("ai_menu_cook_blocks").delete().eq("family_id", familyId).eq("week_id", weekId);
-      if (clearBlocks.error) throw clearBlocks.error;
-      if (plan.cook_blocks.length) {
-        const blockInsert = await db.from("ai_menu_cook_blocks").insert(
-          plan.cook_blocks.map((b) => ({
-            family_id: familyId,
-            week_id: weekId,
-            block_key: b.id,
-            title: b.title,
-            serves: b.serves,
-            ingredients: b.ingredients,
-            recipe: b.recipe,
-          })),
-        );
-        if (blockInsert.error) throw blockInsert.error;
+      if (saved.error) {
+        if (saved.error.code === "40001") {
+          throw new HttpError(409, "import_conflict", "Это меню уже сохраняется с другого устройства. Обновите экран и попробуйте ещё раз.");
+        }
+        throw saved.error;
       }
-
-      const clearShopping = await db.from("weekly_shopping_items").delete().eq("family_id", familyId).eq("week_id", weekId);
-      if (clearShopping.error) throw clearShopping.error;
-      if (shopping.rows.length) {
-        const shoppingInsert = await db.from("weekly_shopping_items").insert(shopping.rows);
-        if (shoppingInsert.error) throw shoppingInsert.error;
-      }
-
-      const importAudit = await db.from("ai_menu_imports").insert({
-        family_id: familyId,
-        week_id: weekId,
-        schema_version: AI_MENU_FORMAT,
-        payload: plan,
-        imported_by: member.id,
-      });
-      if (importAudit.error) throw importAudit.error;
-
-      const weekUpdate = await db.from("weekly_plans").update({
-        status: "draft",
-        validation_ok: true,
-        estimated_cost: shopping.estimated_cost_rub,
-        budget_status: shopping.budget_status,
-        planner_version: null,
-        ai_import_version: AI_MENU_FORMAT,
-        imported_at: new Date().toISOString(),
-        notes: plan.summary || "Меню импортировано из ChatGPT. Покупки рассчитаны ботом.",
-        updated_at: new Date().toISOString(),
-      }).eq("id", weekId).eq("family_id", familyId).select("*").single();
-      if (weekUpdate.error) throw weekUpdate.error;
 
       return reply({
         ok: true,
-        week: weekUpdate.data,
+        week: saved.data,
         imported_meals: mealRows.length,
         cook_blocks: plan.cook_blocks.length,
         shopping: {

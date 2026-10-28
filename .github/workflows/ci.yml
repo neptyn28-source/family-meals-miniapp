@@ -54,6 +54,12 @@ jobs:
               psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f "$f"
             done
           done
+      - name: SQL tests (database functions and triggers)
+        run: |
+          for f in tests/sql/*.test.sql; do
+            echo "sql-test=$f"
+            psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f "$f"
+          done
       - name: Generate and apply dev seed once (consistency check)
         run: |
           npm run seed
