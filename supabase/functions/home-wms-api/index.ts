@@ -3,19 +3,10 @@
 // семья определяется по family_members, family_id с клиента не принимается.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyInitData } from "../_shared/telegram.ts";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type, apikey, authorization",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { AUTH_FAILED_TEXT, CORS, errorResponse, fail, HttpError, reply } from "../_shared/http.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_ROWS = 200;
-
-function reply(body: unknown, status = 200) {
-  return Response.json(body, { status, headers: CORS });
-}
 
 function secretKey(raw: string) {
   try {
@@ -27,7 +18,19 @@ function secretKey(raw: string) {
   return raw;
 }
 
-class BadRequest extends Error {}
+const BAD_INPUT_TEXT: Record<string, string> = {
+  bad_text: "Название пустое или слишком длинное.",
+  bad_id: "Некорректный идентификатор.",
+  bad_position: "Некорректное положение на плане.",
+  bad_size: "Некорректный размер.",
+  bad_rows: "Слишком много строк или неверный формат данных.",
+};
+
+class BadRequest extends HttpError {
+  constructor(code: string) {
+    super(400, code, BAD_INPUT_TEXT[code] ?? "Некорректные данные.");
+  }
+}
 
 function text(value: unknown, max: number): string {
   const s = typeof value === "string" ? value.trim() : "";
@@ -129,7 +132,7 @@ async function extractFurniture(input: string): Promise<string[] | null> {
 
 async function main(req: Request) {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (req.method !== "POST") return reply({ ok: false, error: "Method not allowed" }, 405);
+  if (req.method !== "POST") return fail(405, "method_not_allowed", "Метод не поддерживается.");
 
   try {
     const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -142,7 +145,7 @@ async function main(req: Request) {
     const payload = body?.payload && typeof body.payload === "object" ? body.payload : {};
 
     const auth = await verifyInitData(body?.initData, botToken);
-    if (!auth.ok) return reply({ ok: false, error: auth.error, message: "Telegram-авторизация не прошла" }, 401);
+    if (!auth.ok) return fail(401, "auth_" + auth.error, AUTH_FAILED_TEXT);
 
     const db = createClient(supabaseUrl, secretKey(secretRaw), {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -156,7 +159,7 @@ async function main(req: Request) {
       .maybeSingle();
     if (memberError) throw memberError;
     if (!member) {
-      return reply({ ok: false, error: "not_invited", message: "Этот Telegram-аккаунт не привязан к семье" }, 403);
+      return fail(403, "not_invited", "Этот Telegram-аккаунт не привязан к семье");
     }
     const familyId = String(member.family_id);
 
@@ -250,10 +253,10 @@ async function main(req: Request) {
         cells.map((r) => r.module_id).filter((id) => !newModuleIds.has(id)),
       );
       if (modules.some((r) => !newLocationIds.has(r.location_id) && !knownLocations.has(r.location_id))) {
-        return reply({ ok: false, error: "unknown_location" }, 400);
+        return fail(400, "unknown_location", "Комната не найдена.");
       }
       if (cells.some((r) => !newModuleIds.has(r.module_id) && !knownModules.has(r.module_id))) {
-        return reply({ ok: false, error: "unknown_module" }, 400);
+        return fail(400, "unknown_module", "Мебель не найдена.");
       }
 
       // Повтор после обрыва связи не дублирует строки: уже записанные id пропускаются.
@@ -299,11 +302,9 @@ async function main(req: Request) {
       return reply({ ok: true, items: await extractFurniture(text(payload.text, 500)) });
     }
 
-    return reply({ ok: false, error: "unknown_action" }, 400);
+    return fail(400, "unknown_action", "Неизвестное действие.");
   } catch (err) {
-    if (err instanceof BadRequest) return reply({ ok: false, error: err.message }, 400);
-    console.error(err);
-    return reply({ ok: false, error: "server_error" }, 500);
+    return errorResponse(err);
   }
 }
 

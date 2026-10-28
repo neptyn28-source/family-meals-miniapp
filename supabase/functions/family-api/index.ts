@@ -1,20 +1,11 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyInitData } from "../_shared/telegram.ts";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type, apikey, authorization",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { AUTH_FAILED_TEXT, CORS, errorResponse, fail, HttpError, reply } from "../_shared/http.ts";
 
 const MEAL_TYPES = new Set(["breakfast", "snack1", "lunch", "snack2", "dinner"]);
 const WEEK_STATUSES = new Set(["draft", "approved", "archived"]);
 const RULE_TYPES = new Set(["hard", "preference", "feedback"]);
 const STATES = new Set(["raw", "cooked", "semi_finished", "frozen", "dry", "canned"]);
-
-function reply(body: unknown, status = 200) {
-  return Response.json(body, { status, headers: CORS });
-}
 
 function secretKey(raw: string) {
   try {
@@ -69,18 +60,18 @@ function mergeSettings(current: Record<string, unknown>, patch: Record<string, u
 
   const budget = Number(next.weekly_budget_rub);
   if (!Number.isFinite(budget) || budget <= 0 || budget > 100000) {
-    throw new Error("Некорректный недельный бюджет");
+    throw new HttpError(400, "invalid_settings", "Недельный бюджет — число от 1 до 100 000 ₽.");
   }
   if (!["maintain", "mild_loss", "custom"].includes(String(next.weight_mode))) {
-    throw new Error("Некорректный режим порций");
+    throw new HttpError(400, "invalid_settings", "Некорректный режим порций.");
   }
   for (const k of ["wife_snacks", "husband_snacks"]) {
     const n = Number(next[k]);
-    if (!Number.isInteger(n) || n < 0 || n > 2) throw new Error("Перекусов должно быть от 0 до 2");
+    if (!Number.isInteger(n) || n < 0 || n > 2) throw new HttpError(400, "invalid_settings", "Перекусов должно быть от 0 до 2.");
   }
   const weekdays = next.kindergarten_weekdays;
   if (!Array.isArray(weekdays) || weekdays.some((x) => !Number.isInteger(x) || x < 1 || x > 7)) {
-    throw new Error("Некорректные дни детского сада");
+    throw new HttpError(400, "invalid_settings", "Некорректные дни детского сада.");
   }
   const shoppingWeekdays = next.shopping_weekdays ?? [7, 4];
   if (!Array.isArray(shoppingWeekdays) ||
@@ -88,7 +79,7 @@ function mergeSettings(current: Record<string, unknown>, patch: Record<string, u
       shoppingWeekdays.some((x) => !Number.isInteger(x) || x < 1 || x > 7) ||
       !shoppingWeekdays.includes(7) ||
       !shoppingWeekdays.includes(4)) {
-    throw new Error("Закупки должны быть запланированы на воскресенье и четверг");
+    throw new HttpError(400, "invalid_settings", "Закупки должны быть запланированы на воскресенье и четверг.");
   }
   next.shopping_weekdays = [7, 4];
   next.budget_hard_limit = next.budget_hard_limit !== false;
@@ -129,7 +120,7 @@ function deriveRule(description: string, ruleType: string) {
 
 async function main(req: Request) {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (req.method !== "POST") return reply({ ok: false, error: "Method not allowed" }, 405);
+  if (req.method !== "POST") return fail(405, "method_not_allowed", "Метод не поддерживается.");
 
   try {
     const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -143,7 +134,7 @@ async function main(req: Request) {
     const payload = body?.payload && typeof body.payload === "object" ? body.payload : {};
 
     const auth = await verifyInitData(initData, botToken);
-    if (!auth.ok) return reply({ ok: false, error: auth.error, message: "Telegram-авторизация не прошла" }, 401);
+    if (!auth.ok) return fail(401, "auth_" + auth.error, AUTH_FAILED_TEXT);
 
     const db = createClient(supabaseUrl, secretKey(secretRaw), {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -162,14 +153,14 @@ async function main(req: Request) {
     // Join must work before membership exists.
     if (!member && action === "invite.join") {
       const code = String(payload.code ?? "").trim().toUpperCase();
-      if (!code) return reply({ ok: false, error: "invite_code_required", message: "Введите код приглашения." }, 400);
+      if (!code) return fail(400, "invite_code_required", "Введите код приглашения.");
 
       const { data: invite, error } = await db.from("family_invites").select("*").eq("code", code).maybeSingle();
       if (error) throw error;
-      if (!invite) return reply({ ok: false, error: "invite_not_found", message: "Такого кода приглашения нет." }, 404);
-      if (invite.used_at) return reply({ ok: false, error: "invite_used", message: "Этот код уже использован." }, 409);
+      if (!invite) return fail(404, "invite_not_found", "Такого кода приглашения нет.");
+      if (invite.used_at) return fail(409, "invite_used", "Этот код уже использован.");
       if (new Date(invite.expires_at).getTime() < Date.now()) {
-        return reply({ ok: false, error: "invite_expired", message: "Срок действия кода истёк." }, 410);
+        return fail(410, "invite_expired", "Срок действия кода истёк.");
       }
 
       const joined = await db.from("family_members").insert({
@@ -195,7 +186,7 @@ async function main(req: Request) {
       const count = await db.from("family_members").select("*", { count: "exact", head: true });
       if (count.error) throw count.error;
       if ((count.count ?? 0) > 0) {
-        return reply({ ok: false, error: "not_invited", message: "Вы пока не добавлены в семью." }, 403);
+        return fail(403, "not_invited", "Вы пока не добавлены в семью.");
       }
 
       let family = (await db.from("families").select("*").order("created_at", { ascending: true }).limit(1).maybeSingle()).data;
@@ -226,14 +217,14 @@ async function main(req: Request) {
     const weekForFamily = async (weekId: string) => {
       const r = await db.from("weekly_plans").select("*").eq("id", weekId).eq("family_id", familyId).maybeSingle();
       if (r.error) throw r.error;
-      if (!r.data) throw new Error("Неделя не найдена");
+      if (!r.data) throw new HttpError(404, "week_not_found", "Неделя не найдена.");
       return r.data;
     };
 
     const mealForFamily = async (mealId: string) => {
       const m = await db.from("weekly_meals").select("*").eq("id", mealId).maybeSingle();
       if (m.error) throw m.error;
-      if (!m.data) throw new Error("Блюдо не найдено");
+      if (!m.data) throw new HttpError(404, "meal_not_found", "Блюдо не найдено.");
       await weekForFamily(String(m.data.week_id));
       return m.data;
     };
@@ -255,7 +246,7 @@ async function main(req: Request) {
 
     if (action === "invite.create") {
       if (member.role !== "husband") {
-        return reply({ ok: false, error: "forbidden", message: "Создать приглашение сейчас может только муж." }, 403);
+        return fail(403, "forbidden", "Создать приглашение сейчас может только муж.");
       }
       for (let attempt = 0; attempt < 5; attempt++) {
         const code = inviteCode();
@@ -286,10 +277,10 @@ async function main(req: Request) {
       const unit = String(payload.unit ?? "g").trim();
       const state = String(payload.state ?? "raw");
       const usageMode = String(payload.usage_mode ?? "any");
-      if (!name) return reply({ ok: false, error: "Product name is required" }, 400);
-      if (!Number.isFinite(quantity) || quantity < 0) return reply({ ok: false, error: "Invalid quantity" }, 400);
-      if (!STATES.has(state)) return reply({ ok: false, error: "Invalid product state" }, 400);
-      if (!["any", "cooking_only"].includes(usageMode)) return reply({ ok: false, error: "Invalid usage mode" }, 400);
+      if (!name) return fail(400, "name_required", "Укажите название продукта.");
+      if (!Number.isFinite(quantity) || quantity < 0) return fail(400, "invalid_quantity", "Количество должно быть числом 0 или больше.");
+      if (!STATES.has(state)) return fail(400, "invalid_state", "Неизвестное состояние продукта.");
+      if (!["any", "cooking_only"].includes(usageMode)) return fail(400, "invalid_usage_mode", "Неизвестный режим использования продукта.");
 
       const normalized = name.toLowerCase().replaceAll("ё", "е").replace(/[^a-zа-я0-9]+/gi, " ").replace(/\s+/g, " ").trim();
       const alias = await db.from("ingredient_aliases").select("ingredient_id").eq("alias_norm", normalized).maybeSingle();
@@ -316,17 +307,17 @@ async function main(req: Request) {
 
     if (action === "inventory.update") {
       const id = String(payload.id ?? "");
-      if (!id) return reply({ ok: false, error: "Inventory id is required" }, 400);
+      if (!id) return fail(400, "id_required", "Не указан продукт.");
 
       const existing = await db.from("inventory").select("*").eq("id", id).eq("family_id", familyId).maybeSingle();
       if (existing.error) throw existing.error;
-      if (!existing.data) return reply({ ok: false, error: "Inventory item not found" }, 404);
+      if (!existing.data) return fail(404, "inventory_not_found", "Продукт не найден — возможно, его уже удалили.");
 
       const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
       if (payload.name !== undefined) {
         const name = String(payload.name ?? "").trim();
-        if (!name) return reply({ ok: false, error: "Product name is required" }, 400);
+        if (!name) return fail(400, "name_required", "Укажите название продукта.");
         const normalized = name.toLowerCase().replaceAll("ё", "е").replace(/[^a-zа-я0-9]+/gi, " ").replace(/\s+/g, " ").trim();
         const alias = await db.from("ingredient_aliases").select("ingredient_id").eq("alias_norm", normalized).maybeSingle();
         if (alias.error) throw alias.error;
@@ -335,18 +326,18 @@ async function main(req: Request) {
       }
       if (payload.quantity !== undefined) {
         const quantity = Number(payload.quantity);
-        if (!Number.isFinite(quantity) || quantity < 0) return reply({ ok: false, error: "Invalid quantity" }, 400);
+        if (!Number.isFinite(quantity) || quantity < 0) return fail(400, "invalid_quantity", "Количество должно быть числом 0 или больше.");
         updates.quantity = quantity;
       }
       if (payload.unit !== undefined) updates.unit = String(payload.unit);
       if (payload.state !== undefined) {
         const state = String(payload.state);
-        if (!STATES.has(state)) return reply({ ok: false, error: "Invalid product state" }, 400);
+        if (!STATES.has(state)) return fail(400, "invalid_state", "Неизвестное состояние продукта.");
         updates.state = state;
       }
       if (payload.usage_mode !== undefined) {
         const usageMode = String(payload.usage_mode);
-        if (!["any", "cooking_only"].includes(usageMode)) return reply({ ok: false, error: "Invalid usage mode" }, 400);
+        if (!["any", "cooking_only"].includes(usageMode)) return fail(400, "invalid_usage_mode", "Неизвестный режим использования продукта.");
         updates.usage_mode = usageMode;
       }
       if (payload.urgent !== undefined) updates.urgent = Boolean(payload.urgent);
@@ -362,7 +353,7 @@ async function main(req: Request) {
 
     if (action === "inventory.delete") {
       const id = String(payload.id ?? "");
-      if (!id) return reply({ ok: false, error: "Inventory id is required" }, 400);
+      if (!id) return fail(400, "id_required", "Не указан продукт.");
       const r = await db.from("inventory").delete().eq("id", id).eq("family_id", familyId);
       if (r.error) throw r.error;
       return reply({ ok: true });
@@ -377,8 +368,8 @@ async function main(req: Request) {
     if (action === "rules.add") {
       const description = String(payload.description ?? "").trim();
       const ruleType = String(payload.rule_type ?? "preference");
-      if (!description) return reply({ ok: false, error: "Rule description is required" }, 400);
-      if (!RULE_TYPES.has(ruleType)) return reply({ ok: false, error: "Invalid rule type" }, 400);
+      if (!description) return fail(400, "rule_text_required", "Опишите правило.");
+      if (!RULE_TYPES.has(ruleType)) return fail(400, "invalid_rule_type", "Неизвестный тип правила.");
       const parsed = deriveRule(description, ruleType);
       const r = await db.from("family_rules").insert({
         family_id: familyId,
@@ -394,21 +385,21 @@ async function main(req: Request) {
 
     if (action === "rules.update") {
       const id = String(payload.id ?? "");
-      if (!id) return reply({ ok: false, error: "Rule id is required" }, 400);
+      if (!id) return fail(400, "id_required", "Не указано правило.");
       const existing = await db.from("family_rules").select("*").eq("id", id).eq("family_id", familyId).maybeSingle();
       if (existing.error) throw existing.error;
-      if (!existing.data) return reply({ ok: false, error: "Rule not found" }, 404);
+      if (!existing.data) return fail(404, "rule_not_found", "Правило не найдено — возможно, его уже удалили.");
 
       const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (payload.description !== undefined) {
         const description = String(payload.description).trim();
-        if (!description) return reply({ ok: false, error: "Rule description cannot be empty" }, 400);
+        if (!description) return fail(400, "rule_text_required", "Текст правила не может быть пустым.");
         updates.description = description;
       }
       if (payload.enabled !== undefined) updates.enabled = Boolean(payload.enabled);
       if (payload.rule_type !== undefined) {
         const ruleType = String(payload.rule_type);
-        if (!RULE_TYPES.has(ruleType)) return reply({ ok: false, error: "Invalid rule type" }, 400);
+        if (!RULE_TYPES.has(ruleType)) return fail(400, "invalid_rule_type", "Неизвестный тип правила.");
         updates.rule_type = ruleType;
       }
       if (!String(existing.data.code).startsWith("planner_default_") &&
@@ -425,7 +416,7 @@ async function main(req: Request) {
 
     if (action === "rules.delete") {
       const id = String(payload.id ?? "");
-      if (!id) return reply({ ok: false, error: "Rule id is required" }, 400);
+      if (!id) return fail(400, "id_required", "Не указано правило.");
       const existing = await db.from("family_rules").select("id,code").eq("id", id).eq("family_id", familyId).maybeSingle();
       if (existing.error) throw existing.error;
       if (!existing.data) return reply({ ok: true });
@@ -461,7 +452,7 @@ async function main(req: Request) {
     if (action === "settings.update") {
       const current = await db.from("family_settings").select("settings").eq("family_id", familyId).maybeSingle();
       if (current.error) throw current.error;
-      if (!current.data) return reply({ ok: false, error: "Planner settings are not initialized" }, 409);
+      if (!current.data) return fail(409, "settings_not_initialized", "Настройки семьи ещё не созданы.");
       const patch = payload.settings && typeof payload.settings === "object" ? payload.settings : {};
       const next = mergeSettings(current.data.settings ?? {}, patch);
       const updated = await db.from("family_settings").upsert({
@@ -497,7 +488,7 @@ async function main(req: Request) {
       const amount = Number(payload.package_amount);
       const unit = String(payload.package_unit ?? "");
       if (!ingredientId || !store || !Number.isFinite(price) || price <= 0 || !Number.isFinite(amount) || amount <= 0 || !["g","ml","pcs"].includes(unit)) {
-        return reply({ ok: false, error: "Invalid price data" }, 400);
+        return fail(400, "invalid_price", "Проверьте цену: нужна сумма больше нуля и размер упаковки.");
       }
       const r = await db.from("family_ingredient_prices").upsert({
         family_id: familyId,
@@ -514,7 +505,7 @@ async function main(req: Request) {
 
     if (action === "week.get") {
       const weekStart = String(payload.week_start ?? "").trim();
-      if (!isIsoDate(weekStart)) return reply({ ok: false, error: "Invalid week_start" }, 400);
+      if (!isIsoDate(weekStart)) return fail(400, "invalid_week_start", "Неделя должна начинаться с понедельника (ГГГГ-ММ-ДД).");
       let r = await db.from("weekly_plans").select("*").eq("family_id", familyId).eq("week_start", weekStart).maybeSingle();
       if (r.error) throw r.error;
       if (!r.data) {
@@ -534,14 +525,10 @@ async function main(req: Request) {
     if (action === "week.status") {
       const weekId = String(payload.week_id ?? "");
       const status = String(payload.status ?? "");
-      if (!weekId || !WEEK_STATUSES.has(status)) return reply({ ok: false, error: "Invalid week status request" }, 400);
+      if (!weekId || !WEEK_STATUSES.has(status)) return fail(400, "invalid_week_status", "Неизвестный статус недели.");
       const week = await weekForFamily(weekId);
       if (status === "approved" && !week.validation_ok) {
-        return reply({
-          ok: false,
-          error: "week_not_validated",
-          message: "Сначала пересоберите/проверьте неделю: текущий вариант ещё не прошёл валидатор.",
-        }, 409);
+        return fail(409, "week_not_validated", "Сначала пересоберите/проверьте неделю: текущий вариант ещё не прошёл валидатор.");
       }
       const r = await db.from("weekly_plans").update({ status, updated_at: new Date().toISOString() })
         .eq("id", weekId).eq("family_id", familyId).select("*").single();
@@ -555,11 +542,11 @@ async function main(req: Request) {
       const mealType = String(payload.meal_type ?? "");
       const title = String(payload.title ?? "").trim();
       if (!weekId || !isIsoDate(mealDate) || !MEAL_TYPES.has(mealType) || !title) {
-        return reply({ ok: false, error: "Invalid meal data" }, 400);
+        return fail(400, "invalid_meal", "Проверьте блюдо: дата, приём пищи и название обязательны.");
       }
       const week = await weekForFamily(weekId);
       const diff = isoDiffDays(mealDate, week.week_start);
-      if (diff < 0 || diff > 6) return reply({ ok: false, error: "Meal date is outside this week" }, 400);
+      if (diff < 0 || diff > 6) return fail(400, "meal_outside_week", "Дата блюда не входит в эту неделю.");
 
       const sort: Record<string, number> = { breakfast: 10, snack1: 20, lunch: 30, snack2: 40, dinner: 50 };
       const r = await db.from("weekly_meals").upsert({
@@ -596,7 +583,7 @@ async function main(req: Request) {
 
     if (action === "week.meal.delete") {
       const id = String(payload.id ?? "");
-      if (!id) return reply({ ok: false, error: "Meal id is required" }, 400);
+      if (!id) return fail(400, "id_required", "Не указано блюдо.");
       const meal = await mealForFamily(id);
       const r = await db.from("weekly_meals").delete().eq("id", id);
       if (r.error) throw r.error;
@@ -624,7 +611,7 @@ async function main(req: Request) {
       const purchased = Boolean(payload.purchased);
       const item = await db.from("weekly_shopping_items").select("id,week_id").eq("id", id).eq("family_id", familyId).maybeSingle();
       if (item.error) throw item.error;
-      if (!item.data) return reply({ ok: false, error: "Shopping item not found" }, 404);
+      if (!item.data) return fail(404, "shopping_item_not_found", "Позиция списка покупок не найдена.");
       const r = await db.from("weekly_shopping_items").update({
         purchased,
         purchased_by: purchased ? member.id : null,
@@ -660,16 +647,16 @@ async function main(req: Request) {
       const meal = await mealForFamily(mealId);
       const target = await db.from("family_members").select("id").eq("id", memberId).eq("family_id", familyId).eq("active", true).maybeSingle();
       if (target.error) throw target.error;
-      if (!target.data) return reply({ ok: false, error: "Member not found" }, 404);
+      if (!target.data) return fail(404, "member_not_found", "Член семьи не найден.");
 
       const taste = payload.taste == null ? null : String(payload.taste);
       const portion = payload.portion == null ? null : String(payload.portion);
       const actionValue = payload.action == null ? null : String(payload.action);
       const satiety = payload.satiety == null || payload.satiety === "" ? null : Number(payload.satiety);
-      if (taste && !["liked","neutral","disliked"].includes(taste)) return reply({ ok: false, error: "Invalid taste" }, 400);
-      if (portion && !["too_much","ok","too_little"].includes(portion)) return reply({ ok: false, error: "Invalid portion" }, 400);
-      if (actionValue && !["never","more_often","less_often"].includes(actionValue)) return reply({ ok: false, error: "Invalid feedback action" }, 400);
-      if (satiety !== null && (!Number.isInteger(satiety) || satiety < 0 || satiety > 10)) return reply({ ok: false, error: "Invalid satiety" }, 400);
+      if (taste && !["liked","neutral","disliked"].includes(taste)) return fail(400, "invalid_taste", "Неизвестная оценка вкуса.");
+      if (portion && !["too_much","ok","too_little"].includes(portion)) return fail(400, "invalid_portion", "Неизвестная оценка порции.");
+      if (actionValue && !["never","more_often","less_often"].includes(actionValue)) return fail(400, "invalid_feedback_action", "Неизвестное действие в отзыве.");
+      if (satiety !== null && (!Number.isInteger(satiety) || satiety < 0 || satiety > 10)) return fail(400, "invalid_satiety", "Сытость — целое число от 0 до 10.");
 
       const r = await db.from("weekly_meal_feedback").upsert({
         family_id: familyId,
@@ -692,13 +679,9 @@ async function main(req: Request) {
       return reply({ ok: true, feedback: r.data });
     }
 
-    return reply({ ok: false, error: "Unknown action" }, 400);
+    return fail(400, "unknown_action", "Неизвестное действие.");
   } catch (error) {
-    console.error(error);
-    return reply({
-      ok: false,
-      error: error instanceof Error ? error.message : "Server error",
-    }, 500);
+    return errorResponse(error);
   }
 }
 

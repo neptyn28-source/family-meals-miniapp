@@ -1,34 +1,20 @@
 import { verifyInitData } from "../_shared/telegram.ts";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type, apikey, authorization",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-function reply(body: unknown, status = 200) {
-  return Response.json(body, { status, headers: CORS });
-}
+import { AUTH_FAILED_TEXT, CORS, errorResponse, fail } from "../_shared/http.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (req.method !== "POST") return reply({ ok: false, error: "Method not allowed" }, 405);
+  if (req.method !== "POST") return fail(405, "method_not_allowed", "Метод не поддерживается.");
 
   try {
     const body = await req.json().catch(() => ({}));
     const token = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
     const auth = await verifyInitData(body?.initData, token);
     if (!auth.ok) {
-      return reply({ ok: false, error: auth.error, message: "Telegram-авторизация не прошла" }, 401);
+      return fail(401, "auth_" + auth.error, AUTH_FAILED_TEXT);
     }
 
-    return reply({
-      ok: false,
-      error: "automatic_generation_disabled",
-      message: "Автоматический генератор отключён. Используй «Выгрузить в ИИ» → ChatGPT → «Вставить меню из ИИ».",
-    }, 410);
+    return fail(410, "automatic_generation_disabled", "Автоматический генератор отключён. Используй «Выгрузить в ИИ» → ChatGPT → «Вставить меню из ИИ».");
   } catch (error) {
-    console.error(error);
-    return reply({ ok: false, error: "Server error" }, 500);
+    return errorResponse(error);
   }
 });

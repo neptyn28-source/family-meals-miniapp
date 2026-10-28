@@ -78,7 +78,7 @@ async function callFunction(functionName, action, payload = {}) {
 
   if (!response.ok || !data.ok) {
     const error = new Error(data.message || data.error || `Ошибка сервера ${response.status}`);
-    error.code = data.error || "api_error";
+    error.code = data.code || data.error || "api_error";
     error.status = response.status;
     error.issues = data.issues || [];
     throw error;

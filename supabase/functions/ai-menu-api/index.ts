@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyInitData } from "../_shared/telegram.ts";
+import { AUTH_FAILED_TEXT, CORS, errorResponse, fail, HttpError, reply } from "../_shared/http.ts";
 import {
   AI_MENU_FORMAT,
   AiMenuValidationError,
@@ -21,11 +22,6 @@ import type {
   InventoryItem,
 } from "../_shared/planner/types.ts";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type, apikey, authorization",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
 const MEAL_TYPES = ["breakfast", "snack1", "lunch", "snack2", "dinner"] as const;
 const SORT: Record<string, number> = {
@@ -36,9 +32,6 @@ const SORT: Record<string, number> = {
   dinner: 50,
 };
 
-function reply(body: unknown, status = 200) {
-  return Response.json(body, { status, headers: CORS });
-}
 
 function serviceKey(raw: string) {
   try {
@@ -444,7 +437,7 @@ async function calculateShopping(args: {
 
 async function main(req: Request) {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (req.method !== "POST") return reply({ ok: false, error: "Method not allowed" }, 405);
+  if (req.method !== "POST") return fail(405, "method_not_allowed", "Метод не поддерживается.");
 
   try {
     const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -458,7 +451,7 @@ async function main(req: Request) {
 
     const auth = await verifyInitData(body?.initData, botToken);
     if (!auth.ok) {
-      return reply({ ok: false, error: auth.error, message: "Telegram-авторизация не прошла" }, 401);
+      return fail(401, "auth_" + auth.error, AUTH_FAILED_TEXT);
     }
 
     const db = createClient(supabaseUrl, serviceKey(secretRaw), {
@@ -472,7 +465,7 @@ async function main(req: Request) {
       .eq("active", true)
       .maybeSingle();
     if (memberR.error) throw memberR.error;
-    if (!memberR.data) return reply({ ok: false, error: "not_invited", message: "Вы не подключены к семье." }, 403);
+    if (!memberR.data) return fail(403, "not_invited", "Вы не подключены к семье.");
 
     const member = memberR.data;
     const familyId = String(member.family_id);
@@ -480,7 +473,7 @@ async function main(req: Request) {
     const settingsRow = async () => {
       const r = await db.from("family_settings").select("*").eq("family_id", familyId).maybeSingle();
       if (r.error) throw r.error;
-      if (!r.data) throw new Error("Настройки семьи не инициализированы");
+      if (!r.data) throw new HttpError(409, "settings_not_initialized", "Настройки семьи ещё не созданы.");
       return r.data;
     };
 
@@ -540,7 +533,7 @@ async function main(req: Request) {
 
     if (action === "ai.export") {
       const weekStart = String(payload.week_start ?? "");
-      if (!isDate(weekStart)) return reply({ ok: false, error: "invalid_week_start", message: "Нужен понедельник YYYY-MM-DD." }, 400);
+      if (!isDate(weekStart)) return fail(400, "invalid_week_start", "Нужен понедельник YYYY-MM-DD.");
 
       const [familyR, settings, membersR, rulesR, inventoryR, feedbackR] = await Promise.all([
         db.from("families").select("*").eq("id", familyId).single(),
@@ -578,12 +571,7 @@ async function main(req: Request) {
         plan = parseAiMenuPlan(text);
       } catch (error) {
         if (error instanceof AiMenuValidationError) {
-          return reply({
-            ok: false,
-            error: "menu_validation",
-            message: error.message,
-            issues: error.issues,
-          }, 422);
+          return fail(422, "menu_validation", error.message, { issues: error.issues });
         }
         throw error;
       }
@@ -621,10 +609,7 @@ async function main(req: Request) {
           .sort((a: any, b: any) => Number(b.estimated_price) - Number(a.estimated_price))
           .slice(0, 6)
           .map((x: any) => x.product_name + " ≈" + Math.round(Number(x.estimated_price)) + " ₽");
-        return reply({
-          ok: false,
-          error: "budget_exceeded",
-          message: "Меню дороже недельного бюджета на " + overBy + " ₽. Импорт не сохранён.",
+        return fail(422, "budget_exceeded", "Меню дороже недельного бюджета на " + overBy + " ₽. Импорт не сохранён.", {
           issues: [
             "Лимит: " + shopping.budget_rub + " ₽; расчёт: " + shopping.estimated_cost_rub + " ₽.",
             costly.length ? "Самые дорогие покупки: " + costly.join(", ") + "." : "Упростите меню и используйте больше домашних остатков.",
@@ -634,7 +619,7 @@ async function main(req: Request) {
             budget_rub: shopping.budget_rub,
             budget_status: shopping.budget_status,
           },
-        }, 422);
+        });
       }
 
       const blockById = new Map(plan.cook_blocks.map((b) => [b.id, b]));
@@ -752,13 +737,9 @@ async function main(req: Request) {
       });
     }
 
-    return reply({ ok: false, error: "Unknown action" }, 400);
+    return fail(400, "unknown_action", "Неизвестное действие.");
   } catch (error) {
-    console.error(error);
-    return reply({
-      ok: false,
-      error: error instanceof Error ? error.message : "Server error",
-    }, 500);
+    return errorResponse(error);
   }
 }
 
