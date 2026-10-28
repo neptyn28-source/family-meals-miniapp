@@ -242,6 +242,21 @@ async function main(req: Request) {
         if (error) throw error;
         return new Set((data ?? []).map((r: { id: string }) => r.id));
       };
+      // id, уже занятый строкой другой семьи, upsert молча пропустил бы, а полка прицепилась бы
+      // к чужой мебели. Такие id отклоняем до записи.
+      const takenByOthers = async (table: string, ids: string[]) => {
+        if (ids.length === 0) return false;
+        const { data, error } = await db.from(table).select("id").neq("family_id", familyId).in("id", ids).limit(1);
+        if (error) throw error;
+        return (data ?? []).length > 0;
+      };
+      if (
+        await takenByOthers("wms_locations", locations.map((r) => r.id)) ||
+        await takenByOthers("wms_modules", modules.map((r) => r.id)) ||
+        await takenByOthers("wms_cells", cells.map((r) => r.id))
+      ) {
+        return fail(409, "id_conflict", "Не удалось сохранить: обновите страницу и попробуйте ещё раз.");
+      }
       const newLocationIds = new Set(locations.map((r) => r.id));
       const newModuleIds = new Set(modules.map((r) => r.id));
       const knownLocations = await ownedIds(
@@ -266,7 +281,7 @@ async function main(req: Request) {
         ["wms_cells", cells],
       ] as const) {
         if (batch.length === 0) continue;
-        const { error } = await db.from(table).upsert(batch, { onConflict: "id", ignoreDuplicates: true });
+        const { error } = await db.from(table).upsert(batch as Record<string, unknown>[], { onConflict: "id", ignoreDuplicates: true });
         if (error) throw error;
       }
       // Чужая мебель не найдётся по family_id — обновление просто ничего не тронет.
