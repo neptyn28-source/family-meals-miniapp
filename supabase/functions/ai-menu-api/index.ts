@@ -11,6 +11,7 @@ import {
   type AiMenuPlan,
 } from "../_shared/ai-menu.ts";
 import { buildExportPrompt } from "../_shared/ai-menu-prompt.ts";
+import { checkImportBudget } from "../_shared/import-budget.ts";
 import {
   IngredientIndex,
   stateCompatible,
@@ -594,8 +595,32 @@ async function main(req: Request) {
         settings: settings.settings ?? {},
       });
 
-      if ((settings.settings?.budget_hard_limit ?? true) && shopping.estimated_cost_rub > shopping.budget_rub) {
-        const overBy = Math.round((shopping.estimated_cost_rub - shopping.budget_rub) * 100) / 100;
+      const budgetVerdict = checkImportBudget({
+        hardLimit: settings.settings?.budget_hard_limit ?? true,
+        allowUnverified: settings.settings?.allow_unverified_budget !== false,
+        estimatedRub: shopping.estimated_cost_rub,
+        budgetRub: shopping.budget_rub,
+        unpricedCount: shopping.unpriced_count,
+      });
+      if (!budgetVerdict.ok && budgetVerdict.code === "budget_unverified") {
+        const names = shopping.rows
+          .filter((x: any) => !x.price_known && Number(x.to_buy) > 0)
+          .slice(0, 8)
+          .map((x: any) => x.product_name);
+        return fail(422, "budget_unverified", "Не у всех покупок есть цена — нельзя проверить бюджет. Импорт не сохранён.", {
+          issues: [
+            "Без цены: " + names.join(", ") + ".",
+            "Добавьте цены или разрешите импорт без проверенных цен в настройках.",
+          ],
+          shopping: {
+            estimated_cost_rub: shopping.estimated_cost_rub,
+            budget_rub: shopping.budget_rub,
+            budget_status: shopping.budget_status,
+          },
+        });
+      }
+      if (!budgetVerdict.ok && budgetVerdict.code === "budget_exceeded") {
+        const overBy = budgetVerdict.overByRub;
         const costly = [...shopping.rows]
           .filter((x: any) => Number(x.estimated_price) > 0)
           .sort((a: any, b: any) => Number(b.estimated_price) - Number(a.estimated_price))
