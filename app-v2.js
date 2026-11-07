@@ -88,6 +88,7 @@ async function callFunction(functionName, action, payload = {}) {
 
 const api = (action, payload = {}) => callFunction("family-api", action, payload);
 const aiApi = (action, payload = {}) => callFunction("ai-menu-api", action, payload);
+const wmsApi = (action, payload = {}) => callFunction("home-wms-api", action, payload);
 
 function stateLabel(state) {
   return ({
@@ -1299,9 +1300,102 @@ async function loadMealReplacement() {
   } catch (error) { if (status.isConnected) status.textContent = "Ошибка: " + error.message; }
 }
 
+const WMS_ZONES = {
+  hot: { icon: "🔥", text: "под рукой" },
+  warm: { icon: "🙂", text: "дотянуться" },
+  cold: { icon: "❄️", text: "далеко" },
+};
+const WMS_USAGE = { daily: "каждый день", weekly: "раз в неделю", monthly: "раз в месяц", rare: "редко" };
+
+function wmsSearchText(value) {
+  return String(value ?? "").toLowerCase().replaceAll("ё", "е");
+}
+
+function wmsPlaceText(place) {
+  if (!place) return "Без полки";
+  return place.location + " · " + place.module;
+}
+
+function wmsItemCard(item) {
+  const place = item.place;
+  const zone = place ? WMS_ZONES[place.zone] : null;
+  const shelf = place
+    ? escapeHtml(place.shelf) + " · " + escapeHtml(place.heightFromFloor) + " см от пола" +
+      (zone ? ' · <span title="' + escapeHtml(zone.text) + '">' + zone.icon + " " + escapeHtml(zone.text) + "</span>" : "")
+    : "Полка не указана";
+  const meta = [item.category, WMS_USAGE[item.usage]].filter(Boolean).map(escapeHtml).join(" · ");
+  return '<article class="row-card"><div><b>' + escapeHtml(item.name) + (item.quantity > 1 ? " × " + escapeHtml(item.quantity) : "") +
+    '</b><div class="muted">' + shelf + "</div>" + (meta ? '<div class="muted">' + meta + "</div>" : "") + "</div></article>";
+}
+
+async function showWhereThings() {
+  showPanel('<h2>🔎 Где что лежит</h2><p>Поиск вещей по комнатам, шкафам и полкам из раздела «Хранение».</p>' +
+    '<input id="wmsSearch" type="search" placeholder="Например: аптечка, носки, крупы" autocomplete="off" style="' + inputStyle() + '">' +
+    '<div id="wmsCategories" style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0"></div>' +
+    '<div id="wmsResult" class="muted">Загружаем вещи…</div>');
+  const result = document.querySelector("#wmsResult");
+  let items = [];
+  try {
+    items = (await wmsApi("wms.items.load")).items || [];
+  } catch (error) {
+    if (result.isConnected) result.textContent = "Не удалось загрузить вещи: " + error.message;
+    return;
+  }
+  if (!result.isConnected) return;
+  if (!items.length) {
+    result.textContent = "Вещей пока нет. Они появятся здесь, когда их разложат по полкам в «Хранении».";
+    return;
+  }
+
+  const search = document.querySelector("#wmsSearch");
+  const chips = document.querySelector("#wmsCategories");
+  const categories = [...new Set(items.map((i) => i.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  let category = "";
+  const haystack = new Map(items.map((i) => [i, wmsSearchText([i.name, i.category, i.place?.location, i.place?.module, i.place?.shelf].join(" "))]));
+
+  function drawChips() {
+    chips.innerHTML = ["", ...categories].map((c) =>
+      '<button type="button" data-category="' + escapeHtml(c) + '" style="' +
+      buttonStyle("padding:6px 10px;font-weight:600;" + (c === category ? "background:#2f6f4e;color:#fff" : "")) + '">' +
+      escapeHtml(c || "Все") + "</button>").join("");
+    chips.querySelectorAll("[data-category]").forEach((btn) => btn.addEventListener("click", () => {
+      category = btn.dataset.category;
+      drawChips();
+      draw();
+    }));
+  }
+
+  function draw() {
+    const words = wmsSearchText(search.value).split(/\s+/).filter(Boolean);
+    const found = items.filter((i) => (!category || i.category === category) && words.every((w) => haystack.get(i).includes(w)));
+    if (!found.length) {
+      result.innerHTML = "<p>Ничего не нашлось. Попробуй другое слово или выбери «Все».</p>";
+      return;
+    }
+    let html = '<p class="muted">Найдено: ' + found.length + "</p>";
+    let group = null;
+    for (const item of found) {
+      const title = wmsPlaceText(item.place);
+      if (title !== group) {
+        group = title;
+        html += '<h3 style="margin:14px 0 6px">' + escapeHtml(title) + "</h3>";
+      }
+      html += wmsItemCard(item);
+    }
+    result.classList.remove("muted");
+    result.innerHTML = html;
+  }
+
+  search.addEventListener("input", draw);
+  drawChips();
+  draw();
+  search.focus();
+}
+
 document.querySelectorAll(".tile").forEach((button) => {
   button.addEventListener("click", async () => {
     const action = button.dataset.action;
+    if (action === "where") return showWhereThings();
     if (action === "today") return showToday();
     if (action === "insights") return showFoodDiary();
     if (action === "replace") return showMealReplacement();

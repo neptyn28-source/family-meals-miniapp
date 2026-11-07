@@ -3,6 +3,7 @@
 // семья определяется по family_members, family_id с клиента не принимается.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyInitData } from "../_shared/telegram.ts";
+import { shapeWmsItems, type WmsItemRow } from "./items.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -187,6 +188,17 @@ async function main(req: Request) {
         })),
       }));
       return reply({ ok: true, locations });
+    }
+
+    if (action === "wms.items.load") {
+      const { data, error } = await db
+        .from("wms_items")
+        .select(
+          "id, name, category, quantity, usage_frequency, wms_cells(label, height_from_floor_cm, zone_type, position, wms_modules(name, position, wms_locations(name, position)))",
+        )
+        .eq("family_id", familyId);
+      if (error) throw error;
+      return reply({ ok: true, items: shapeWmsItems(data as unknown as WmsItemRow[]) });
     }
 
     if (action === "wms.save") {
