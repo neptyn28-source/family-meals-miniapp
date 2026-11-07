@@ -1365,13 +1365,57 @@ async function showWhereThings() {
     }));
   }
 
+  // Если вещи нет в базе по названию, спрашиваем Gemini, что это, и показываем,
+  // где лежат вещи той же категории — туда её и стоит искать или положить.
+  const guesses = new Map();
+  let guessTimer = null;
+
+  function drawGuess(query, data) {
+    const box = result.querySelector("#wmsGuess");
+    if (!box || wmsSearchText(search.value).trim() !== query) return;
+    const draft = data.draft;
+    const same = draft.category ? items.filter((i) => i.category === draft.category && i.place) : [];
+    const places = [...new Map(same.map((i) => [wmsPlaceText(i.place) + " · " + i.place.shelf, i])).values()].slice(0, 6);
+    let html = "";
+    if (draft.aiUsed && draft.category) {
+      html += "<p>«" + escapeHtml(search.value.trim()) + "» — это, похоже, <b>" + escapeHtml(draft.category) + "</b>." +
+        (places.length ? " Такие вещи у вас лежат здесь:" : " Вещей этой категории в «Хранении» пока нет.") + "</p>";
+      html += places.map((i) => '<article class="row-card"><div><b>' + escapeHtml(wmsPlaceText(i.place)) + " → " + escapeHtml(i.place.shelf) +
+        '</b><div class="muted">' + escapeHtml(i.name) + "</div></div></article>").join("");
+    }
+    html += '<p class="muted">Если вещь у вас есть, внесите её — тогда поиск будет находить её сразу.</p>' +
+      '<button id="wmsGuessAdd" style="' + buttonStyle() + '">📥 Положить «' + escapeHtml(search.value.trim()) + "»</button>";
+    box.innerHTML = html;
+    box.querySelector("#wmsGuessAdd").addEventListener("click", () => showIntake({ text: search.value.trim(), ...data }));
+  }
+
+  function scheduleGuess(query) {
+    clearTimeout(guessTimer);
+    if (query.length < 3) return;
+    if (guesses.has(query)) { drawGuess(query, guesses.get(query)); return; }
+    guessTimer = setTimeout(async () => {
+      try {
+        const data = await wmsApi("wms.intake.analyze", { text: query });
+        guesses.set(query, data);
+        drawGuess(query, data);
+      } catch (error) {
+        const box = result.querySelector("#wmsGuess");
+        if (box) box.textContent = "";
+      }
+    }, 700);
+  }
+
   function draw() {
     const words = wmsSearchText(search.value).split(/\s+/).filter(Boolean);
     const found = items.filter((i) => (!category || i.category === category) && words.every((w) => haystack.get(i).includes(w)));
     if (!found.length) {
-      result.innerHTML = "<p>Ничего не нашлось. Попробуй другое слово или выбери «Все».</p>";
+      const query = wmsSearchText(search.value).trim();
+      result.innerHTML = "<p>По названию в «Хранении» ничего не нашлось.</p>" +
+        (query.length >= 3 ? '<div id="wmsGuess" class="muted">Смотрю, что это за вещь…</div>' : "<p>Попробуй другое слово или выбери «Все».</p>");
+      scheduleGuess(query);
       return;
     }
+    clearTimeout(guessTimer);
     let html = '<p class="muted">Найдено: ' + found.length + "</p>";
     let group = null;
     for (const item of found) {
@@ -1423,7 +1467,7 @@ function wmsChoiceButtons(name, choices, selected) {
     escapeHtml(label) + "</button>").join("") + "</div>";
 }
 
-async function showIntake() {
+async function showIntake(prefill = null) {
   showPanel('<h2>📥 Положить вещь</h2><p>Сфотографируй вещь или опиши её — система сама решит, куда её убрать по 5S.</p>' +
     '<div class="form-grid"><label for="intakeText">Что убираем?</label>' +
     '<input id="intakeText" maxlength="300" placeholder="Например: зимняя куртка жены, дрель, таблетки" style="' + inputStyle() + '">' +
@@ -1454,6 +1498,9 @@ async function showIntake() {
     } catch (error) { step.textContent = "Не удалось определить вещь: " + error.message; }
     finally { analyzeBtn.disabled = false; }
   });
+  // Пришли из поиска: вещь уже распознана, сразу показываем черновик.
+  if (prefill?.text) document.querySelector("#intakeText").value = prefill.text;
+  if (prefill?.draft) showIntakeDraft(step, prefill.draft, prefill.categories || []);
 }
 
 function showIntakeDraft(step, draft, categories) {
@@ -1530,8 +1577,8 @@ function showIntakeSuggestions(result, profile, suggestions) {
       result.innerHTML = '<div class="success-box">Готово: «' + escapeHtml(profile.name) + "» лежит в " + escapeHtml(s.location) + " → " +
         escapeHtml(s.module) + " → " + escapeHtml(s.shelf) + '.</div><div style="display:flex;gap:8px;margin-top:10px">' +
         '<button id="intakeMore" style="' + buttonStyle() + '">Положить ещё</button><button id="intakeWhere" style="' + buttonStyle() + '">Где что лежит</button></div>';
-      result.querySelector("#intakeMore").addEventListener("click", showIntake);
-      result.querySelector("#intakeWhere").addEventListener("click", showWhereThings);
+      result.querySelector("#intakeMore").addEventListener("click", () => showIntake());
+      result.querySelector("#intakeWhere").addEventListener("click", () => showWhereThings());
     } catch (error) {
       status.textContent = "Не сохранилось: " + error.message;
       result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = false; });
