@@ -104,7 +104,7 @@ export async function choosePlacements(
     PLACEMENT_SCHEMA,
     apiKey,
     model,
-    { temperature: 0.2, timeoutMs: 40000, label: "Gemini placement" },
+    { temperature: 0.2, timeoutMs: 25000, label: "Gemini placement" },
     fetcher,
   );
   const picked = pickFromAnswer(raw, candidates);

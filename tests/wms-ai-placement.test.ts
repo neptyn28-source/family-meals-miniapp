@@ -65,3 +65,18 @@ test("Модель не понимает настройку размышлени
   assertEquals(bodies[1].includes("thinkingConfig"), false);
   assertEquals(res[0].by, "ai");
 });
+
+test("Основная модель перегружена — отвечает запасная", async () => {
+  const candidates = suggestPlacements(PRINTER, CELLS, 80);
+  const urls: string[] = [];
+  const fetcher = (url: string) => {
+    urls.push(url);
+    if (urls.length === 1) return Promise.resolve(new Response("busy", { status: 503 }));
+    return answer([{ number: 1, reason: "ок" }])();
+  };
+  const res = await choosePlacements(PRINTER, candidates, CELLS, "key", "main-model", fetcher);
+  assertEquals(urls.length, 2);
+  assertEquals(urls[0].includes("main-model"), true);
+  assertEquals(urls[1].includes("gemini-flash-lite-latest"), true);
+  assertEquals(res[0].by, "ai");
+});
