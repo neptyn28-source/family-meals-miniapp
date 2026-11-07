@@ -5,7 +5,7 @@
 // Если Gemini недоступен — возвращаем места по баллам из placement.ts.
 
 import type { CellInfo, ItemProfile, Suggestion } from "./placement.ts";
-import type { Fetcher } from "./intake.ts";
+import { askGemini, type Fetcher } from "./intake.ts";
 
 /** Факты о доме, которых модель не может знать сама. */
 export const HOUSE_FACTS = [
@@ -99,28 +99,14 @@ export async function choosePlacements(
   const fallback = candidates.slice(0, 3).map((s) => ({ ...s, by: "rules" as const }));
   if (!apiKey || candidates.length === 0) return fallback;
   const byId = new Map(cells.map((c) => [c.id, c]));
-  try {
-    const res = await fetcher(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: placementPrompt(item, candidates, byId) }] }],
-          generationConfig: { temperature: 0.2, responseMimeType: "application/json", responseSchema: PLACEMENT_SCHEMA },
-        }),
-        signal: AbortSignal.timeout(20000),
-      },
-    );
-    if (!res.ok) {
-      console.error("Gemini placement failed", res.status, (await res.text()).slice(0, 300));
-      return fallback;
-    }
-    const data = await res.json();
-    const picked = pickFromAnswer(JSON.parse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "null"), candidates);
-    return picked.length ? picked : fallback;
-  } catch (err) {
-    console.error("Gemini placement failed", err);
-    return fallback;
-  }
+  const raw = await askGemini(
+    [{ text: placementPrompt(item, candidates, byId) }],
+    PLACEMENT_SCHEMA,
+    apiKey,
+    model,
+    { temperature: 0.2, timeoutMs: 40000, label: "Gemini placement" },
+    fetcher,
+  );
+  const picked = pickFromAnswer(raw, candidates);
+  return picked.length ? picked : fallback;
 }

@@ -50,3 +50,18 @@ test("В подсказке модели есть комнаты, соседи �
     assertEquals(text.includes(part), true, part);
   }
 });
+
+test("Модель не понимает настройку размышлений — повтор без неё", async () => {
+  const candidates = suggestPlacements(PRINTER, CELLS, 80);
+  const bodies: string[] = [];
+  const fetcher = (_url: string, init: RequestInit) => {
+    bodies.push(String(init.body));
+    if (bodies.length === 1) return Promise.resolve(new Response("bad thinking", { status: 400 }));
+    return answer([{ number: 1, reason: "ок" }])();
+  };
+  const res = await choosePlacements(PRINTER, candidates, CELLS, "key", "m", fetcher);
+  assertEquals(bodies.length, 2);
+  assertEquals(bodies[0].includes("thinkingConfig"), true);
+  assertEquals(bodies[1].includes("thinkingConfig"), false);
+  assertEquals(res[0].by, "ai");
+});

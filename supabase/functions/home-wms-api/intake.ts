@@ -85,6 +85,51 @@ export function fallbackName(text: string): string {
 export type IntakeInput = { text: string; photo: { mime: string; data: string } | null };
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * Запрос к Gemini с JSON-ответом. Просим модель думать недолго (иначе новые модели отвечают дольше 15 с);
+ * если модель не понимает настройку размышлений — повторяем без неё.
+ */
+export async function askGemini(
+  parts: unknown[],
+  schema: unknown,
+  apiKey: string,
+  model: string,
+  opts: { temperature: number; timeoutMs: number; label: string },
+  fetcher: Fetcher = fetch,
+): Promise<unknown | null> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const call = (thinking: boolean) => {
+    const generationConfig: Record<string, unknown> = {
+      temperature: opts.temperature,
+      responseMimeType: "application/json",
+      responseSchema: schema,
+    };
+    if (thinking) generationConfig.thinkingConfig = { thinkingLevel: "low" };
+    return fetcher(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify({ contents: [{ parts }], generationConfig }),
+      signal: AbortSignal.timeout(opts.timeoutMs),
+    });
+  };
+  try {
+    let res = await call(true);
+    if (res.status === 400) {
+      console.error(opts.label + " thinking config rejected", (await res.text()).slice(0, 300));
+      res = await call(false);
+    }
+    if (!res.ok) {
+      console.error(opts.label + " failed", res.status, (await res.text()).slice(0, 300));
+      return null;
+    }
+    const data = await res.json();
+    return JSON.parse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "null");
+  } catch (err) {
+    console.error(opts.label + " failed", err);
+    return null;
+  }
+}
+
 /** Запрос к Gemini. Без ключа или при ошибке возвращает черновик без ИИ — приёмка всё равно работает. */
 export async function analyzeItem(
   input: IntakeInput,
@@ -96,27 +141,6 @@ export async function analyzeItem(
   if (!apiKey) return parseIntake(null, input.text, categories);
   const parts: unknown[] = [{ text: intakePrompt(input.text, categories) }];
   if (input.photo) parts.push({ inline_data: { mime_type: input.photo.mime, data: input.photo.data } });
-  try {
-    const res = await fetcher(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: INTAKE_SCHEMA },
-        }),
-        signal: AbortSignal.timeout(15000),
-      },
-    );
-    if (!res.ok) {
-      console.error("Gemini intake failed", res.status, (await res.text()).slice(0, 300));
-      return parseIntake(null, input.text, categories);
-    }
-    const data = await res.json();
-    return parseIntake(JSON.parse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "null"), input.text, categories);
-  } catch (err) {
-    console.error("Gemini intake failed", err);
-    return parseIntake(null, input.text, categories);
-  }
+  const raw = await askGemini(parts, INTAKE_SCHEMA, apiKey, model, { temperature: 0, timeoutMs: 30000, label: "Gemini intake" }, fetcher);
+  return parseIntake(raw, input.text, categories);
 }
