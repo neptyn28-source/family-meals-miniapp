@@ -85,52 +85,117 @@ export function fallbackName(text: string): string {
 export type IntakeInput = { text: string; photo: { mime: string; data: string } | null };
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
-/** Запасная модель, если основная перегружена у Google (503/429) или не отвечает. */
+/** Запасная модель Gemini, если основная перегружена у Google (503/429) или не отвечает. */
 export const BACKUP_MODEL = "gemini-flash-lite-latest";
+/** Модели Groq — второй бесплатный поставщик, если Gemini недоступен совсем. */
+export const GROQ_MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"];
+
+/** Ключи ИИ: строка — только ключ Gemini (как раньше), объект — Gemini и/или Groq. */
+export type AiKeys = string | { gemini?: string; groq?: string; groqModel?: string } | undefined;
+
+function keysOf(keys: AiKeys): { gemini?: string; groq?: string; groqModel?: string } {
+  return typeof keys === "string" ? { gemini: keys } : keys ?? {};
+}
+
+export function hasAi(keys: AiKeys): boolean {
+  const k = keysOf(keys);
+  return !!(k.gemini || k.groq);
+}
+
+const RETRY_STATUSES = [404, 429, 500, 502, 503, 504];
 
 /**
- * Запрос к Gemini с JSON-ответом. Просим модель думать недолго (иначе новые модели отвечают дольше 15 с);
- * если модель не понимает настройку размышлений — повторяем без неё. Если модель перегружена или молчит —
- * пробуем запасную.
+ * Запрос к ИИ с JSON-ответом. Сначала Gemini (основная модель, потом запасная), потом Groq.
+ * Gemini просим думать недолго; если модель не понимает эту настройку — повторяем без неё.
  */
 export async function askGemini(
   parts: unknown[],
   schema: unknown,
-  apiKey: string,
+  keys: AiKeys,
   model: string,
   opts: { temperature: number; timeoutMs: number; label: string },
   fetcher: Fetcher = fetch,
 ): Promise<unknown | null> {
-  const call = (m: string, thinking: boolean) => {
-    const generationConfig: Record<string, unknown> = {
-      temperature: opts.temperature,
-      responseMimeType: "application/json",
-      responseSchema: schema,
+  const k = keysOf(keys);
+  if (k.gemini) {
+    const call = (m: string, thinking: boolean) => {
+      const generationConfig: Record<string, unknown> = {
+        temperature: opts.temperature,
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      };
+      if (thinking) generationConfig.thinkingConfig = { thinkingLevel: "low" };
+      return fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": k.gemini! },
+        body: JSON.stringify({ contents: [{ parts }], generationConfig }),
+        signal: AbortSignal.timeout(opts.timeoutMs),
+      });
     };
-    if (thinking) generationConfig.thinkingConfig = { thinkingLevel: "low" };
-    return fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({ contents: [{ parts }], generationConfig }),
-      signal: AbortSignal.timeout(opts.timeoutMs),
-    });
-  };
-  for (const m of [...new Set([model, BACKUP_MODEL])]) {
-    try {
-      let res = await call(m, true);
-      if (res.status === 400) {
-        console.error(`${opts.label} ${m}: thinking config rejected`, (await res.text()).slice(0, 300));
-        res = await call(m, false);
+    for (const m of [...new Set([model, BACKUP_MODEL])]) {
+      try {
+        let res = await call(m, true);
+        if (res.status === 400) {
+          console.error(`${opts.label} ${m}: thinking config rejected`, (await res.text()).slice(0, 300));
+          res = await call(m, false);
+        }
+        if (!res.ok) {
+          console.error(`${opts.label} ${m} failed`, res.status, (await res.text()).slice(0, 300));
+          if (RETRY_STATUSES.includes(res.status)) continue;
+          break;
+        }
+        const data = await res.json();
+        return JSON.parse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "null");
+      } catch (err) {
+        console.error(`${opts.label} ${m} failed`, err);
       }
+    }
+  }
+  if (k.groq) return askGroq(parts, schema, k.groq, k.groqModel, opts, fetcher);
+  return null;
+}
+
+/** Groq (совместим с OpenAI). Понимает только текст: фото без описания ему не передать. */
+async function askGroq(
+  parts: unknown[],
+  schema: unknown,
+  apiKey: string,
+  preferred: string | undefined,
+  opts: { temperature: number; timeoutMs: number; label: string },
+  fetcher: Fetcher,
+): Promise<unknown | null> {
+  const text = parts.map((p) => (p as { text?: string })?.text).filter(Boolean).join("\n");
+  if (!text) return null;
+  // Groq отдаёт только JSON-объект, поэтому список заворачиваем в { items: [...] }.
+  const isArray = (schema as { type?: string })?.type === "ARRAY";
+  const shape = isArray ? { type: "OBJECT", properties: { items: schema }, required: ["items"] } : schema;
+  const prompt = text + "\n\nОтветь строго одним JSON-объектом по этой схеме (типы в стиле Google): " + JSON.stringify(shape);
+  for (const m of [...new Set([preferred, ...GROQ_MODELS].filter((x): x is string => !!x))]) {
+    try {
+      const res = await fetcher("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: m,
+          temperature: opts.temperature,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: "Отвечай только JSON, без пояснений вокруг. Тексты внутри JSON — по-русски." },
+            { role: "user", content: prompt },
+          ],
+        }),
+        signal: AbortSignal.timeout(opts.timeoutMs),
+      });
       if (!res.ok) {
-        console.error(`${opts.label} ${m} failed`, res.status, (await res.text()).slice(0, 300));
-        if (res.status === 503 || res.status === 429 || res.status === 500 || res.status === 404) continue;
+        console.error(`${opts.label} groq ${m} failed`, res.status, (await res.text()).slice(0, 300));
+        if (RETRY_STATUSES.includes(res.status) || res.status === 400) continue;
         return null;
       }
       const data = await res.json();
-      return JSON.parse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "null");
+      const parsed = JSON.parse(data?.choices?.[0]?.message?.content ?? "null");
+      return isArray ? (parsed?.items ?? null) : parsed;
     } catch (err) {
-      console.error(`${opts.label} ${m} failed`, err);
+      console.error(`${opts.label} groq ${m} failed`, err);
     }
   }
   return null;
@@ -140,13 +205,13 @@ export async function askGemini(
 export async function analyzeItem(
   input: IntakeInput,
   categories: string[],
-  apiKey: string | undefined,
+  apiKey: AiKeys,
   model: string,
   fetcher: Fetcher = fetch,
 ): Promise<IntakeDraft> {
-  if (!apiKey) return parseIntake(null, input.text, categories);
+  if (!hasAi(apiKey)) return parseIntake(null, input.text, categories);
   const parts: unknown[] = [{ text: intakePrompt(input.text, categories) }];
   if (input.photo) parts.push({ inline_data: { mime_type: input.photo.mime, data: input.photo.data } });
-  const raw = await askGemini(parts, INTAKE_SCHEMA, apiKey, model, { temperature: 0, timeoutMs: 20000, label: "Gemini intake" }, fetcher);
+  const raw = await askGemini(parts, INTAKE_SCHEMA, apiKey, model, { temperature: 0, timeoutMs: 20000, label: "AI intake" }, fetcher);
   return parseIntake(raw, input.text, categories);
 }

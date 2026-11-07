@@ -137,6 +137,13 @@ type CellWithItemsRow = {
 
 const num = (v: number | string | null) => (v === null ? null : Number(v));
 
+/** Ключи ИИ из секретов Supabase: Gemini — основной, Groq — запасной. */
+const aiKeys = () => ({
+  gemini: Deno.env.get("GEMINI_API_KEY") || undefined,
+  groq: Deno.env.get("GROQ_API_KEY") || undefined,
+  groqModel: Deno.env.get("GROQ_MODEL") || undefined,
+});
+
 async function extractFurniture(input: string): Promise<string[] | null> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) return null;
@@ -271,7 +278,7 @@ async function main(req: Request) {
       const draft = await analyzeItem(
         { text: description, photo },
         categories,
-        Deno.env.get("GEMINI_API_KEY"),
+        aiKeys(),
         Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest",
       );
       return reply({ ok: true, draft, categories });
@@ -307,7 +314,7 @@ async function main(req: Request) {
         item,
         candidates,
         cells,
-        Deno.env.get("GEMINI_API_KEY"),
+        aiKeys(),
         Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest",
       );
       return reply({ ok: true, suggestions });

@@ -80,3 +80,31 @@ test("Основная модель перегружена — отвечает 
   assertEquals(urls[1].includes("gemini-flash-lite-latest"), true);
   assertEquals(res[0].by, "ai");
 });
+
+test("Gemini перегружен совсем — отвечает Groq", async () => {
+  const candidates = suggestPlacements(PRINTER, CELLS, 80);
+  const urls: string[] = [];
+  let groqBody = "";
+  const fetcher = (url: string, init: RequestInit) => {
+    urls.push(url);
+    if (url.includes("googleapis")) return Promise.resolve(new Response("busy", { status: 503 }));
+    groqBody = String(init.body);
+    return Promise.resolve(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ items: [{ number: 1, reason: "сухо и под рукой" }] }) } }],
+    })));
+  };
+  const res = await choosePlacements(PRINTER, candidates, CELLS, { gemini: "g", groq: "q" }, "m", fetcher);
+  assertEquals(urls.filter((u) => u.includes("googleapis")).length, 2);
+  assertEquals(urls.at(-1), "https://api.groq.com/openai/v1/chat/completions");
+  assertEquals(groqBody.includes("json_object"), true);
+  assertEquals([res[0].by, res[0].reasons[0]], ["ai", "сухо и под рукой"]);
+});
+
+test("Только ключ Groq — тоже работает", async () => {
+  const candidates = suggestPlacements(PRINTER, CELLS, 80);
+  const fetcher = () => Promise.resolve(new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ items: [{ number: 1, reason: "ок" }] }) } }],
+  })));
+  const res = await choosePlacements(PRINTER, candidates, CELLS, { groq: "q" }, "m", fetcher);
+  assertEquals(res[0].by, "ai");
+});

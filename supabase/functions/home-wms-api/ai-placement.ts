@@ -5,7 +5,7 @@
 // Если Gemini недоступен — возвращаем места по баллам из placement.ts.
 
 import type { CellInfo, ItemProfile, Suggestion } from "./placement.ts";
-import { askGemini, type Fetcher } from "./intake.ts";
+import { type AiKeys, askGemini, type Fetcher, hasAi } from "./intake.ts";
 
 /** Факты о доме, которых модель не может знать сама. */
 export const HOUSE_FACTS = [
@@ -92,19 +92,19 @@ export async function choosePlacements(
   item: ItemProfile,
   candidates: Suggestion[],
   cells: CellInfo[],
-  apiKey: string | undefined,
+  apiKey: AiKeys,
   model: string,
   fetcher: Fetcher = fetch,
 ): Promise<Suggestion[]> {
   const fallback = candidates.slice(0, 3).map((s) => ({ ...s, by: "rules" as const }));
-  if (!apiKey || candidates.length === 0) return fallback;
+  if (!hasAi(apiKey) || candidates.length === 0) return fallback;
   const byId = new Map(cells.map((c) => [c.id, c]));
   const raw = await askGemini(
     [{ text: placementPrompt(item, candidates, byId) }],
     PLACEMENT_SCHEMA,
     apiKey,
     model,
-    { temperature: 0.2, timeoutMs: 25000, label: "Gemini placement" },
+    { temperature: 0.2, timeoutMs: 25000, label: "AI placement" },
     fetcher,
   );
   const picked = pickFromAnswer(raw, candidates);
