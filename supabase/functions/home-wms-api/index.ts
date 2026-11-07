@@ -140,7 +140,7 @@ const num = (v: number | string | null) => (v === null ? null : Number(v));
 async function extractFurniture(input: string): Promise<string[] | null> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) return null;
-  const model = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
+  const model = Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest";
   const prompt =
     `Пользователь перечисляет мебель для хранения в комнате. Верни JSON-массив названий предметов мебели, ` +
     `каждое с заглавной буквы, без количества и лишних слов. Если предметов несколько одинаковых — ` +
@@ -272,7 +272,7 @@ async function main(req: Request) {
         { text: description, photo },
         categories,
         Deno.env.get("GEMINI_API_KEY"),
-        Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash",
+        Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest",
       );
       return reply({ ok: true, draft, categories });
     }
@@ -308,7 +308,7 @@ async function main(req: Request) {
         candidates,
         cells,
         Deno.env.get("GEMINI_API_KEY"),
-        Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash",
+        Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest",
       );
       return reply({ ok: true, suggestions });
     }
