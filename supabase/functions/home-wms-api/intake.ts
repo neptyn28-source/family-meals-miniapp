@@ -26,7 +26,7 @@ export function intakePrompt(text: string, categories: string[]): string {
     "can_hang — можно ли хранить на вешалке на штанге (одежда, сумки);",
     "can_fold — мягкая ли вещь, можно ли её сложить или сжать (ткань, одежда, пледы);",
     "hazardous — опасна ли для ребёнка 2 лет: бытовая химия, лекарства, острое, батарейки, мелкие детали;",
-    "width_cm, height_cm, depth_cm — примерные габариты в сантиметрах, как вещь лежит или висит.",
+    "width_cm, height_cm, depth_cm — примерные габариты в сантиметрах, как вещь лежит или висит. Оцени их обязательно, даже если есть только название: возьми типичный размер такой вещи.",
     text ? `Описание от человека: «${text}».` : "Описания нет — только фото.",
   ].join("\n");
 }
@@ -45,7 +45,7 @@ export const INTAKE_SCHEMA = {
     height_cm: { type: "NUMBER" },
     depth_cm: { type: "NUMBER" },
   },
-  required: ["name", "category", "usage", "weight", "can_hang", "can_fold", "hazardous"],
+  required: ["name", "category", "usage", "weight", "can_hang", "can_fold", "hazardous", "width_cm", "height_cm", "depth_cm"],
 };
 
 function cm(value: unknown): number | null {

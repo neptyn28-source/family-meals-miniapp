@@ -1511,18 +1511,20 @@ async function showIntake(prefill = null) {
 
 function showIntakeDraft(step, draft, categories) {
   const item = { ...draft };
-  const options = ['<option value="">— без категории —</option>', ...categories.map((c) =>
-    '<option' + (c === item.category ? " selected" : "") + ">" + escapeHtml(c) + "</option>")].join("");
+  const categoryOptions = (selected) => ['<option value="">— без категории —</option>', ...categories.map((c) =>
+    '<option' + (c === selected ? " selected" : "") + ">" + escapeHtml(c) + "</option>"), '<option value="__own">✏️ Своя категория…</option>'].join("");
+  const options = categoryOptions(item.category);
   const s = item.size || {};
   step.innerHTML = '<div class="subcard"><p class="muted">' + (item.aiUsed ? "Вот что я понял. Поправь, если не так." : "Gemini сейчас недоступен — заполни сам, это быстро.") + "</p>" +
     '<div class="form-grid"><label for="draftName">Вещь</label><input id="draftName" maxlength="120" value="' + escapeHtml(item.name) + '" style="' + inputStyle() + '">' +
     '<label for="draftCategory">Категория</label><select id="draftCategory" style="' + inputStyle() + '">' + options + "</select>" +
+    (item.aiUsed ? '<p class="muted" id="draftGuessNote" style="margin:0">Категорию и размер Gemini определил по названию — можно поменять.</p>' : "") +
     "<b>Как часто ей пользуетесь?</b>" + wmsChoiceButtons("usage", WMS_USAGE_CHOICES, item.usage) +
     "<b>Насколько тяжёлая?</b>" + wmsChoiceButtons("weight", WMS_WEIGHT_CHOICES, item.weight) +
     '<label class="checkline"><input type="checkbox" id="draftHang"' + (item.canHang ? " checked" : "") + "> Можно повесить на вешалку</label>" +
     '<label class="checkline"><input type="checkbox" id="draftFold"' + (item.canFold ? " checked" : "") + "> Мягкая, можно сложить</label>" +
     '<label class="checkline"><input type="checkbox" id="draftHazard"' + (item.hazardous ? " checked" : "") + "> Опасно для ребёнка (химия, лекарства, острое)</label>" +
-    '<b>Размер, см (если знаешь)</b><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' +
+    '<b>Размер, см (примерно)</b><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' +
     ["width", "height", "depth"].map((k, i) => '<input id="draftSize_' + k + '" type="number" min="1" max="400" inputmode="numeric" placeholder="' +
       ["ширина", "высота", "глубина"][i] + '" value="' + escapeHtml(s[k] ?? "") + '" style="' + inputStyle() + '">').join("") + "</div>" +
     '<button id="draftSuggest" class="cook-open">Подобрать место</button></div><div id="draftResult"></div></div>';
@@ -1536,13 +1538,49 @@ function showIntakeDraft(step, draft, categories) {
     });
   }));
 
+  // Своя категория: вписать название, она добавится в список.
+  const categorySelect = step.querySelector("#draftCategory");
+  let categoryTouched = false;
+  let lastCategory = categorySelect.value;
+  categorySelect.addEventListener("change", () => {
+    categoryTouched = true;
+    if (categorySelect.value !== "__own") { lastCategory = categorySelect.value; return; }
+    const own = (window.prompt("Название категории") || "").trim().slice(0, 60);
+    if (own && !categories.includes(own)) categories.push(own);
+    categorySelect.innerHTML = categoryOptions(own || lastCategory);
+    lastCategory = categorySelect.value;
+  });
+
+  // Поправили название — Gemini заново определяет категорию и размер (если их не меняли руками).
+  const sizeTouched = new Set();
+  ["width", "height", "depth"].forEach((k) => step.querySelector("#draftSize_" + k).addEventListener("input", () => sizeTouched.add(k)));
+  const nameInput = step.querySelector("#draftName");
+  let nameTimer = null;
+  let nameSeq = 0;
+  nameInput.addEventListener("input", () => {
+    clearTimeout(nameTimer);
+    const text = nameInput.value.trim();
+    if (text.length < 3) return;
+    nameTimer = setTimeout(async () => {
+      const seq = ++nameSeq;
+      try {
+        const data = await wmsApi("wms.intake.analyze", { text, photo: null });
+        const d = data.draft;
+        if (seq !== nameSeq || !d?.aiUsed) return;
+        (data.categories || []).forEach((c) => { if (!categories.includes(c)) categories.push(c); });
+        if (!categoryTouched) { categorySelect.innerHTML = categoryOptions(d.category); lastCategory = categorySelect.value; }
+        if (d.size) ["width", "height", "depth"].forEach((k) => { if (!sizeTouched.has(k)) step.querySelector("#draftSize_" + k).value = d.size[k]; });
+      } catch (_) { /* без Gemini просто оставляем как есть */ }
+    }, 800);
+  });
+
   const result = step.querySelector("#draftResult");
   const suggestBtn = step.querySelector("#draftSuggest");
   suggestBtn.addEventListener("click", async () => {
     const dims = ["width", "height", "depth"].map((k) => Number(step.querySelector("#draftSize_" + k).value));
     const profile = {
       name: step.querySelector("#draftName").value.trim() || item.name,
-      category: step.querySelector("#draftCategory").value || null,
+      category: categorySelect.value && categorySelect.value !== "__own" ? categorySelect.value : null,
       usage: item.usage,
       weight: item.weight,
       canHang: step.querySelector("#draftHang").checked,
@@ -1567,7 +1605,7 @@ function showIntakeSuggestions(result, profile, suggestions) {
   }
   result.innerHTML = "<h3>Куда убрать «" + escapeHtml(profile.name) + "»</h3>" + suggestions.map((s, i) => {
     const zone = WMS_ZONES[s.zone];
-    return '<article class="row-card"><div><b>' + (i === 0 ? "⭐ " : "") + escapeHtml(s.location) + " → " + escapeHtml(s.module) + " → " + escapeHtml(s.shelf) + "</b>" +
+    return '<article class="row-card"><div>' + (i === 0 && s.by === "ai" ? '<div class="muted">🤖 выбрал Gemini</div>' : "") + '<b>' + (i === 0 ? "⭐ " : "") + escapeHtml(s.location) + " → " + escapeHtml(s.module) + " → " + escapeHtml(s.shelf) + "</b>" +
       '<div class="muted">' + (s.mode === "hang" ? "Повесить" : "Положить") + " · " + escapeHtml(WMS_STORAGE_TEXT[s.storageType] || s.storageType) + " · " +
       escapeHtml(s.heightFromFloor) + " см от пола" + (zone ? " · " + zone.icon + " " + escapeHtml(zone.text) : "") + "</div>" +
       (s.reasons.length ? '<ul class="muted" style="margin:4px 0 6px 18px;padding:0">' + s.reasons.map((r) => "<li>" + escapeHtml(r) + "</li>").join("") + "</ul>" : "") +

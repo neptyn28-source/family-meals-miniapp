@@ -6,6 +6,7 @@ import { verifyInitData } from "../_shared/telegram.ts";
 import { shapeWmsItems, type WmsItemRow } from "./items.ts";
 import { suggestPlacements, type CellInfo, type ItemProfile, type Size } from "./placement.ts";
 import { analyzeItem, BASE_CATEGORIES } from "./intake.ts";
+import { choosePlacements } from "./ai-placement.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -131,7 +132,7 @@ type CellWithItemsRow = {
   storage_type: CellInfo["storageType"];
   allowed_categories: string[] | null;
   wms_modules: { name: string; wms_locations: { name: string } | null } | null;
-  wms_items: { category: string | null }[];
+  wms_items: { category: string | null; name: string }[];
 };
 
 const num = (v: number | string | null) => (v === null ? null : Number(v));
@@ -282,7 +283,7 @@ async function main(req: Request) {
       const { data, error } = await db
         .from("wms_cells")
         .select(
-          "id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, storage_type, allowed_categories, wms_modules(name, wms_locations(name)), wms_items(category)",
+          "id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, storage_type, allowed_categories, wms_modules(name, wms_locations(name)), wms_items(category, name)",
         )
         .eq("family_id", familyId);
       if (error) throw error;
@@ -300,7 +301,16 @@ async function main(req: Request) {
         allowedCategories: c.allowed_categories,
         items: c.wms_items ?? [],
       }));
-      return reply({ ok: true, suggestions: suggestPlacements(item, cells, 3) });
+      // Код оставляет только физически и безопасно возможные места, выбирает из них Gemini.
+      const candidates = suggestPlacements(item, cells, 80);
+      const suggestions = await choosePlacements(
+        item,
+        candidates,
+        cells,
+        Deno.env.get("GEMINI_API_KEY"),
+        Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash",
+      );
+      return reply({ ok: true, suggestions });
     }
 
     // Положить вещь на выбранную полку.

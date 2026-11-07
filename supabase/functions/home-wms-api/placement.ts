@@ -37,7 +37,7 @@ export type CellInfo = {
   zone: Zone;
   storageType: StorageType;
   allowedCategories: string[] | null;
-  items: { category: string | null }[];
+  items: { category: string | null; name?: string }[];
 };
 
 export type Suggestion = {
@@ -51,6 +51,8 @@ export type Suggestion = {
   mode: "hang" | "put";
   score: number;
   reasons: string[];
+  /** Кто выбрал место: Gemini или баллы по правилам. */
+  by?: "ai" | "rules";
 };
 
 /** Выше этой высоты двухлетний ребёнок не дотянется даже со стула у шкафа. */
