@@ -140,7 +140,9 @@ const num = (v: number | string | null) => (v === null ? null : Number(v));
 /** Ключи ИИ из секретов Supabase: Gemini — основной, Groq — запасной. */
 const aiKeys = () => ({
   gemini: Deno.env.get("GEMINI_API_KEY") || undefined,
-  groq: Deno.env.get("GROQ_API_KEY") || undefined,
+  // Имя секрета пишут по-разному (Groq/Grok) — принимаем любые из привычных вариантов.
+  groq: ["GROQ_API_KEY", "GROQ_API", "GROK_API", "GROK_API_KEY", "GROQ_KEY", "GROK_KEY"]
+    .map((name) => Deno.env.get(name)).find((v) => !!v) || undefined,
   groqModel: Deno.env.get("GROQ_MODEL") || undefined,
 });
 
