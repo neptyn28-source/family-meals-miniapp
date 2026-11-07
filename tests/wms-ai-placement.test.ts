@@ -77,7 +77,7 @@ test("Основная модель перегружена — отвечает 
   const res = await choosePlacements(PRINTER, candidates, CELLS, "key", "main-model", fetcher);
   assertEquals(urls.length, 2);
   assertEquals(urls[0].includes("main-model"), true);
-  assertEquals(urls[1].includes("gemini-flash-lite-latest"), true);
+  assertEquals(urls[1].includes("gemini-flash-latest"), true);
   assertEquals(res[0].by, "ai");
 });
 

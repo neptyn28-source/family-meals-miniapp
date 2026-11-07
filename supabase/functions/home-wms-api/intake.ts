@@ -85,8 +85,8 @@ export function fallbackName(text: string): string {
 export type IntakeInput = { text: string; photo: { mime: string; data: string } | null };
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
-/** Запасная модель Gemini, если основная перегружена у Google (503/429) или не отвечает. */
-export const BACKUP_MODEL = "gemini-flash-lite-latest";
+/** Запасная модель Gemini (умнее, но медленнее), если основная lite перегружена у Google или не отвечает. */
+export const BACKUP_MODEL = "gemini-flash-latest";
 /** Модели Groq — второй бесплатный поставщик, если Gemini недоступен совсем. */
 export const GROQ_MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"];
 
