@@ -4,6 +4,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyInitData } from "../_shared/telegram.ts";
 import { shapeWmsItems, type WmsItemRow } from "./items.ts";
+import { suggestPlacements, type CellInfo, type ItemProfile, type Size } from "./placement.ts";
+import { analyzeItem, BASE_CATEGORIES } from "./intake.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -85,6 +87,54 @@ type ModuleRow = {
 type LocationRow = { id: string; name: string; position: number; wms_modules: ModuleRow[] };
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
+
+const USAGES = ["daily", "weekly", "monthly", "rare"] as const;
+const WEIGHTS = ["light", "medium", "heavy"] as const;
+const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_PHOTO_BASE64 = 4_000_000;
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T {
+  if (typeof value !== "string" || !allowed.includes(value as T)) throw new BadRequest("bad_enum");
+  return value as T;
+}
+
+function size(value: unknown): Size | null {
+  if (value == null) return null;
+  const s = value as Record<string, unknown>;
+  const w = cm(s.width, 400, false)!, h = cm(s.height, 400, false)!, d = cm(s.depth, 400, false)!;
+  return w > 0 && h > 0 && d > 0 ? { width: w, height: h, depth: d } : null;
+}
+
+function profile(value: unknown): ItemProfile {
+  if (!value || typeof value !== "object") throw new BadRequest("bad_item");
+  const r = value as Record<string, unknown>;
+  return {
+    name: text(r.name, 120),
+    category: r.category == null || r.category === "" ? null : text(r.category, 60),
+    usage: oneOf(r.usage, USAGES),
+    weight: oneOf(r.weight, WEIGHTS),
+    canHang: r.canHang === true,
+    canFold: r.canFold === true,
+    hazardous: r.hazardous === true,
+    size: size(r.size),
+  };
+}
+
+type CellWithItemsRow = {
+  id: string;
+  label: string;
+  height_from_floor_cm: number | string;
+  width_cm: number | string | null;
+  depth_cm: number | string | null;
+  height_cm: number | string | null;
+  zone_type: CellInfo["zone"];
+  storage_type: CellInfo["storageType"];
+  allowed_categories: string[] | null;
+  wms_modules: { name: string; wms_locations: { name: string } | null } | null;
+  wms_items: { category: string | null }[];
+};
+
+const num = (v: number | string | null) => (v === null ? null : Number(v));
 
 async function extractFurniture(input: string): Promise<string[] | null> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
@@ -199,6 +249,91 @@ async function main(req: Request) {
         .eq("family_id", familyId);
       if (error) throw error;
       return reply({ ok: true, items: shapeWmsItems(data as unknown as WmsItemRow[]) });
+    }
+
+    // Умная приёмка: что за вещь (по фото и/или описанию) — черновик профиля для подтверждения.
+    if (action === "wms.intake.analyze") {
+      const description = typeof payload.text === "string" ? payload.text.trim().slice(0, 500) : "";
+      let photo: { mime: string; data: string } | null = null;
+      if (payload.photo != null) {
+        const p = payload.photo as Record<string, unknown>;
+        if (!PHOTO_TYPES.includes(String(p.mime)) || typeof p.data !== "string" || p.data.length > MAX_PHOTO_BASE64) {
+          throw new BadRequest("bad_photo");
+        }
+        photo = { mime: String(p.mime), data: p.data };
+      }
+      if (!description && !photo) throw new BadRequest("bad_text");
+      const { data, error } = await db.from("wms_items").select("category").eq("family_id", familyId);
+      if (error) throw error;
+      const own = (data ?? []).map((r: { category: string | null }) => r.category).filter((c): c is string => !!c);
+      const categories = [...new Set([...BASE_CATEGORIES, ...own])];
+      const draft = await analyzeItem(
+        { text: description, photo },
+        categories,
+        Deno.env.get("GEMINI_API_KEY"),
+        Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash",
+      );
+      return reply({ ok: true, draft, categories });
+    }
+
+    // Умное размещение 5S: лучшие полки для вещи с объяснением, почему.
+    if (action === "wms.place.suggest") {
+      const item = profile(payload.item);
+      const { data, error } = await db
+        .from("wms_cells")
+        .select(
+          "id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, storage_type, allowed_categories, wms_modules(name, wms_locations(name)), wms_items(category)",
+        )
+        .eq("family_id", familyId);
+      if (error) throw error;
+      const cells: CellInfo[] = (data as unknown as CellWithItemsRow[]).map((c) => ({
+        id: c.id,
+        location: c.wms_modules?.wms_locations?.name ?? "",
+        module: c.wms_modules?.name ?? "",
+        shelf: c.label,
+        heightFromFloor: Number(c.height_from_floor_cm),
+        width: num(c.width_cm),
+        depth: num(c.depth_cm),
+        height: num(c.height_cm),
+        zone: c.zone_type,
+        storageType: c.storage_type,
+        allowedCategories: c.allowed_categories,
+        items: c.wms_items ?? [],
+      }));
+      return reply({ ok: true, suggestions: suggestPlacements(item, cells, 3) });
+    }
+
+    // Положить вещь на выбранную полку.
+    if (action === "wms.items.add") {
+      const item = profile(payload.item);
+      const cellId = uuid(payload.cell_id);
+      const quantity = payload.quantity == null ? 1 : position(payload.quantity) || 1;
+      const { data: cell, error: cellError } = await db
+        .from("wms_cells")
+        .select("id")
+        .eq("family_id", familyId)
+        .eq("id", cellId)
+        .maybeSingle();
+      if (cellError) throw cellError;
+      if (!cell) return reply({ ok: false, error: "unknown_cell" }, 400);
+      const { data, error } = await db
+        .from("wms_items")
+        .insert({
+          family_id: familyId,
+          cell_id: cellId,
+          name: item.name,
+          category: item.category,
+          usage_frequency: item.usage,
+          weight_class: item.weight,
+          quantity,
+          width_cm: item.size?.width ?? null,
+          height_cm: item.size?.height ?? null,
+          depth_cm: item.size?.depth ?? null,
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      return reply({ ok: true, id: data.id });
     }
 
     if (action === "wms.save") {

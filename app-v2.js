@@ -1392,22 +1392,173 @@ async function showWhereThings() {
   search.focus();
 }
 
-// Telegram может показать index.html из кэша, а app-v2.js грузится заново всегда:
-// добавляем плитку сами, если в старой странице её ещё нет.
-if (!document.querySelector('.tile[data-action="where"]')) {
-  const whereTile = document.createElement("button");
-  whereTile.className = "tile";
-  whereTile.dataset.action = "where";
-  whereTile.innerHTML = '<span class="tile-icon" aria-hidden="true">🔎</span><b>Где что лежит</b><span>Поиск вещей по полкам</span>';
-  const storageTile = document.querySelector('.tile[href*="home-wms"]');
-  if (storageTile) storageTile.after(whereTile);
-  else document.querySelector(".grid")?.prepend(whereTile);
+const WMS_USAGE_CHOICES = [["daily", "Каждый день"], ["weekly", "Раз в неделю"], ["monthly", "Раз в месяц"], ["rare", "Редко, по сезону"]];
+const WMS_WEIGHT_CHOICES = [["light", "Лёгкая"], ["medium", "Средняя, 1–5 кг"], ["heavy", "Тяжёлая, больше 5 кг"]];
+const WMS_STORAGE_TEXT = { shelf: "полка", drawer: "ящик", rod: "штанга", hook: "крючок", bulky: "крупный отсек" };
+
+/** Фото с телефона уменьшаем до 1024 px, чтобы быстро уходило в Gemini. */
+function wmsPhotoToJpeg(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 1024 / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      resolve({ mime: "image/jpeg", data: dataUrl.split(",")[1], preview: dataUrl });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Не удалось прочитать фото")); };
+    img.src = url;
+  });
 }
+
+function wmsChoiceButtons(name, choices, selected) {
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px">' + choices.map(([value, label]) =>
+    '<button type="button" data-choice="' + name + '" data-value="' + value + '" style="' +
+    buttonStyle("padding:8px 11px;font-weight:600;" + (value === selected ? "background:#2f6f4e;color:#fff" : "")) + '">' +
+    escapeHtml(label) + "</button>").join("") + "</div>";
+}
+
+async function showIntake() {
+  showPanel('<h2>📥 Положить вещь</h2><p>Сфотографируй вещь или опиши её — система сама решит, куда её убрать по 5S.</p>' +
+    '<div class="form-grid"><label for="intakeText">Что убираем?</label>' +
+    '<input id="intakeText" maxlength="300" placeholder="Например: зимняя куртка жены, дрель, таблетки" style="' + inputStyle() + '">' +
+    '<label for="intakePhoto">Фото (необязательно)</label><input id="intakePhoto" type="file" accept="image/*" capture="environment">' +
+    '<img id="intakePreview" alt="" style="display:none;max-width:100%;max-height:220px;border-radius:12px">' +
+    '<button id="intakeAnalyze" class="cook-open">Определить вещь</button></div><div id="intakeStep" role="status"></div>');
+  let photo = null;
+  const step = document.querySelector("#intakeStep");
+  document.querySelector("#intakePhoto").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      photo = await wmsPhotoToJpeg(file);
+      const preview = document.querySelector("#intakePreview");
+      preview.src = photo.preview;
+      preview.style.display = "block";
+    } catch (error) { step.textContent = error.message; }
+  });
+  const analyzeBtn = document.querySelector("#intakeAnalyze");
+  analyzeBtn.addEventListener("click", async () => {
+    const text = document.querySelector("#intakeText").value.trim();
+    if (!text && !photo) { step.textContent = "Напиши, что это за вещь, или добавь фото."; return; }
+    analyzeBtn.disabled = true;
+    step.textContent = "Смотрю на вещь…";
+    try {
+      const data = await wmsApi("wms.intake.analyze", { text, photo: photo ? { mime: photo.mime, data: photo.data } : null });
+      showIntakeDraft(step, data.draft, data.categories || []);
+    } catch (error) { step.textContent = "Не удалось определить вещь: " + error.message; }
+    finally { analyzeBtn.disabled = false; }
+  });
+}
+
+function showIntakeDraft(step, draft, categories) {
+  const item = { ...draft };
+  const options = ['<option value="">— без категории —</option>', ...categories.map((c) =>
+    '<option' + (c === item.category ? " selected" : "") + ">" + escapeHtml(c) + "</option>")].join("");
+  const s = item.size || {};
+  step.innerHTML = '<div class="subcard"><p class="muted">' + (item.aiUsed ? "Вот что я понял. Поправь, если не так." : "Gemini сейчас недоступен — заполни сам, это быстро.") + "</p>" +
+    '<div class="form-grid"><label for="draftName">Вещь</label><input id="draftName" maxlength="120" value="' + escapeHtml(item.name) + '" style="' + inputStyle() + '">' +
+    '<label for="draftCategory">Категория</label><select id="draftCategory" style="' + inputStyle() + '">' + options + "</select>" +
+    "<b>Как часто ей пользуетесь?</b>" + wmsChoiceButtons("usage", WMS_USAGE_CHOICES, item.usage) +
+    "<b>Насколько тяжёлая?</b>" + wmsChoiceButtons("weight", WMS_WEIGHT_CHOICES, item.weight) +
+    '<label class="checkline"><input type="checkbox" id="draftHang"' + (item.canHang ? " checked" : "") + "> Можно повесить на вешалку</label>" +
+    '<label class="checkline"><input type="checkbox" id="draftFold"' + (item.canFold ? " checked" : "") + "> Мягкая, можно сложить</label>" +
+    '<label class="checkline"><input type="checkbox" id="draftHazard"' + (item.hazardous ? " checked" : "") + "> Опасно для ребёнка (химия, лекарства, острое)</label>" +
+    '<b>Размер, см (если знаешь)</b><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' +
+    ["width", "height", "depth"].map((k, i) => '<input id="draftSize_' + k + '" type="number" min="1" max="400" inputmode="numeric" placeholder="' +
+      ["ширина", "высота", "глубина"][i] + '" value="' + escapeHtml(s[k] ?? "") + '" style="' + inputStyle() + '">').join("") + "</div>" +
+    '<button id="draftSuggest" class="cook-open">Подобрать место</button></div><div id="draftResult"></div></div>';
+
+  step.querySelectorAll("[data-choice]").forEach((btn) => btn.addEventListener("click", () => {
+    item[btn.dataset.choice] = btn.dataset.value;
+    step.querySelectorAll('[data-choice="' + btn.dataset.choice + '"]').forEach((b) => {
+      const on = b === btn;
+      b.style.background = on ? "#2f6f4e" : "";
+      b.style.color = on ? "#fff" : "";
+    });
+  }));
+
+  const result = step.querySelector("#draftResult");
+  const suggestBtn = step.querySelector("#draftSuggest");
+  suggestBtn.addEventListener("click", async () => {
+    const dims = ["width", "height", "depth"].map((k) => Number(step.querySelector("#draftSize_" + k).value));
+    const profile = {
+      name: step.querySelector("#draftName").value.trim() || item.name,
+      category: step.querySelector("#draftCategory").value || null,
+      usage: item.usage,
+      weight: item.weight,
+      canHang: step.querySelector("#draftHang").checked,
+      canFold: step.querySelector("#draftFold").checked,
+      hazardous: step.querySelector("#draftHazard").checked,
+      size: dims.every((n) => n > 0 && n <= 400) ? { width: dims[0], height: dims[1], depth: dims[2] } : null,
+    };
+    suggestBtn.disabled = true;
+    result.textContent = "Ищу лучшее место…";
+    try {
+      const data = await wmsApi("wms.place.suggest", { item: profile });
+      showIntakeSuggestions(result, profile, data.suggestions || []);
+    } catch (error) { result.textContent = "Не удалось подобрать место: " + error.message; }
+    finally { suggestBtn.disabled = false; }
+  });
+}
+
+function showIntakeSuggestions(result, profile, suggestions) {
+  if (!suggestions.length) {
+    result.innerHTML = "<p>Подходящего места нет: вещь не влезает или все подходящие полки опасны для неё. Попробуй уменьшить размер или снять галочки.</p>";
+    return;
+  }
+  result.innerHTML = "<h3>Куда убрать «" + escapeHtml(profile.name) + "»</h3>" + suggestions.map((s, i) => {
+    const zone = WMS_ZONES[s.zone];
+    return '<article class="row-card"><div><b>' + (i === 0 ? "⭐ " : "") + escapeHtml(s.location) + " → " + escapeHtml(s.module) + " → " + escapeHtml(s.shelf) + "</b>" +
+      '<div class="muted">' + (s.mode === "hang" ? "Повесить" : "Положить") + " · " + escapeHtml(WMS_STORAGE_TEXT[s.storageType] || s.storageType) + " · " +
+      escapeHtml(s.heightFromFloor) + " см от пола" + (zone ? " · " + zone.icon + " " + escapeHtml(zone.text) : "") + "</div>" +
+      (s.reasons.length ? '<ul class="muted" style="margin:4px 0 6px 18px;padding:0">' + s.reasons.map((r) => "<li>" + escapeHtml(r) + "</li>").join("") + "</ul>" : "") +
+      '<button data-place="' + i + '" style="' + buttonStyle() + '">Положу сюда</button></div></article>';
+  }).join("") + '<p id="placeStatus" role="status"></p>';
+  result.querySelectorAll("[data-place]").forEach((btn) => btn.addEventListener("click", async () => {
+    const s = suggestions[Number(btn.dataset.place)];
+    const status = result.querySelector("#placeStatus");
+    result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = true; });
+    status.textContent = "Сохраняю…";
+    try {
+      await wmsApi("wms.items.add", { item: profile, cell_id: s.cellId });
+      result.innerHTML = '<div class="success-box">Готово: «' + escapeHtml(profile.name) + "» лежит в " + escapeHtml(s.location) + " → " +
+        escapeHtml(s.module) + " → " + escapeHtml(s.shelf) + '.</div><div style="display:flex;gap:8px;margin-top:10px">' +
+        '<button id="intakeMore" style="' + buttonStyle() + '">Положить ещё</button><button id="intakeWhere" style="' + buttonStyle() + '">Где что лежит</button></div>';
+      result.querySelector("#intakeMore").addEventListener("click", showIntake);
+      result.querySelector("#intakeWhere").addEventListener("click", showWhereThings);
+    } catch (error) {
+      status.textContent = "Не сохранилось: " + error.message;
+      result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = false; });
+    }
+  }));
+}
+
+// Telegram может показать index.html из кэша, а app-v2.js грузится заново всегда:
+// добавляем плитки сами, если в старой странице их ещё нет.
+function ensureWmsTile(action, html) {
+  if (document.querySelector('.tile[data-action="' + action + '"]')) return;
+  const tile = document.createElement("button");
+  tile.className = "tile";
+  tile.dataset.action = action;
+  tile.innerHTML = html;
+  const anchor = document.querySelector('.tile[data-action="where"]') || document.querySelector('.tile[href*="home-wms"]');
+  if (anchor) anchor.after(tile);
+  else document.querySelector(".grid")?.prepend(tile);
+}
+ensureWmsTile("where", '<span class="tile-icon" aria-hidden="true">🔎</span><b>Где что лежит</b><span>Поиск вещей по полкам</span>');
+ensureWmsTile("intake", '<span class="tile-icon" aria-hidden="true">📥</span><b>Положить вещь</b><span>Система сама подберёт место по 5S</span>');
 
 document.querySelectorAll(".tile").forEach((button) => {
   button.addEventListener("click", async () => {
     const action = button.dataset.action;
     if (action === "where") return showWhereThings();
+    if (action === "intake") return showIntake();
     if (action === "today") return showToday();
     if (action === "insights") return showFoodDiary();
     if (action === "replace") return showMealReplacement();
