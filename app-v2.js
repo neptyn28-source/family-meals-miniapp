@@ -1476,7 +1476,13 @@ async function showIntake(prefill = null) {
     '<button id="intakeAnalyze" class="cook-open">Определить вещь</button></div><div id="intakeStep" role="status"></div>');
   let photo = null;
   const step = document.querySelector("#intakeStep");
+  // Описание или фото поменялись — старый черновик относится к другой вещи, убираем его.
+  const resetDraft = () => {
+    if (step.innerHTML) step.innerHTML = '<p class="muted">Вещь изменилась — нажми «Определить вещь».</p>';
+  };
+  document.querySelector("#intakeText").addEventListener("input", resetDraft);
   document.querySelector("#intakePhoto").addEventListener("change", async (event) => {
+    resetDraft();
     const file = event.target.files?.[0];
     if (!file) return;
     try {
