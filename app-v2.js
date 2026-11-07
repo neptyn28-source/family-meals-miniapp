@@ -1392,6 +1392,18 @@ async function showWhereThings() {
   search.focus();
 }
 
+// Telegram может показать index.html из кэша, а app-v2.js грузится заново всегда:
+// добавляем плитку сами, если в старой странице её ещё нет.
+if (!document.querySelector('.tile[data-action="where"]')) {
+  const whereTile = document.createElement("button");
+  whereTile.className = "tile";
+  whereTile.dataset.action = "where";
+  whereTile.innerHTML = '<span class="tile-icon" aria-hidden="true">🔎</span><b>Где что лежит</b><span>Поиск вещей по полкам</span>';
+  const storageTile = document.querySelector('.tile[href*="home-wms"]');
+  if (storageTile) storageTile.after(whereTile);
+  else document.querySelector(".grid")?.prepend(whereTile);
+}
+
 document.querySelectorAll(".tile").forEach((button) => {
   button.addEventListener("click", async () => {
     const action = button.dataset.action;
