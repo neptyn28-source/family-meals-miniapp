@@ -137,12 +137,24 @@ type CellWithItemsRow = {
 
 const num = (v: number | string | null) => (v === null ? null : Number(v));
 
+/** Ключ Groq: имя секрета пишут по-разному (Groq/Grok, с пробелом, строчными) — ищем любой секрет со словом groq/grok. */
+function groqKey(): string | undefined {
+  let env: Record<string, string> = {};
+  try {
+    env = Deno.env.toObject();
+  } catch {
+    return Deno.env.get("GROQ_API_KEY") || undefined;
+  }
+  const names = Object.keys(env).filter((n) => /gro[qk]/i.test(n) && !/model/i.test(n));
+  const name = names.find((n) => env[n]?.startsWith("gsk_")) ?? names[0];
+  if (!name) console.error("Groq key not found in secrets");
+  return name ? env[name] : undefined;
+}
+
 /** Ключи ИИ из секретов Supabase: Gemini — основной, Groq — запасной. */
 const aiKeys = () => ({
   gemini: Deno.env.get("GEMINI_API_KEY") || undefined,
-  // Имя секрета пишут по-разному (Groq/Grok) — принимаем любые из привычных вариантов.
-  groq: ["GROQ_API_KEY", "GROQ_API", "GROK_API", "GROK_API_KEY", "GROQ_KEY", "GROK_KEY"]
-    .map((name) => Deno.env.get(name)).find((v) => !!v) || undefined,
+  groq: groqKey(),
   groqModel: Deno.env.get("GROQ_MODEL") || undefined,
 });
 
