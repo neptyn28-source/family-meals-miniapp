@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main, ai-assisted-menu-flow]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -27,6 +27,8 @@ jobs:
             supabase/functions/family-api/index.ts \
             supabase/functions/ai-menu-api/index.ts \
             supabase/functions/week-generate/index.ts \
+            supabase/functions/family-budget/index.ts \
+            supabase/functions/home-wms-api/index.ts \
             supabase/functions/_shared/ai-menu.ts \
             supabase/functions/_shared/planner/planner.ts \
             supabase/functions/_shared/telegram.ts \
