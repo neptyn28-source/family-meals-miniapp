@@ -1188,107 +1188,123 @@ async function showShopping() {
   }
 }
 
+// Отзывы на блюда: каждое блюдо недели — один раз, одна оценка от того, кто открыл бот.
+// Блюдо, приготовленное на два дня, не повторяется. Оценка сохраняется сразу по нажатию
+// и пишется на первое появление блюда в неделе (или туда, где уже лежит прежняя оценка) —
+// так ChatGPT видит одну строку на блюдо.
+const FB_CHOICES = {
+  taste: [["liked", "👍", "Вкусно"], ["neutral", "😐", "Нормально"], ["disliked", "👎", "Не понравилось"]],
+  portion: [["too_little", "", "Мало"], ["ok", "", "В самый раз"], ["too_much", "", "Много"]],
+  action: [["more_often", "", "Готовить чаще"], ["less_often", "", "Реже"], ["never", "", "Больше не предлагать"]],
+};
+
+function dishGroups(meals) {
+  const groups = new Map();
+  [...meals].sort((x, y) => String(x.meal_date).localeCompare(String(y.meal_date))).forEach((meal) => {
+    const title = String(meal.title || "").trim();
+    if (!title) return;
+    const key = title.toLowerCase() + "|" + (meal.recipe_key ?? "");
+    if (!groups.has(key)) groups.set(key, { title, meals: [] });
+    groups.get(key).meals.push(meal);
+  });
+  return [...groups.values()];
+}
+
+function shortDay(value) {
+  return new Intl.DateTimeFormat("ru-RU", { weekday: "short" }).format(new Date(String(value).slice(0, 10) + "T12:00:00"));
+}
+
 async function showFeedback() {
   showPanel(
-    weekChooser("fb", "Отзывы на блюда", "Заполняй вкус, размер порции, сытость и комментарии. Следующая выгрузка в ChatGPT включит эти данные.") +
+    weekChooser("fb", "Отзывы на блюда", "Оцени блюда недели — следующее меню из ChatGPT учтёт твои оценки. Каждое блюдо один раз, сохраняется сразу.") +
     '<div id="fbStatus" class="muted">Загружаем…</div><div id="fbContent"></div>'
   );
   bindWeekNav("fb", showFeedback);
   const status = document.querySelector("#fbStatus");
   const content = document.querySelector("#fbContent");
+  const me = bootstrapData?.member;
 
   try {
     const weekData = await api("week.get", { week_start: isoDate(activeWeekStart) });
     const data = await api("feedback.list", { week_id: weekData.week.id });
-    const meals = weekData.meals || [];
-    const people = (data.members || []).filter((m) => ["husband","wife"].includes(m.role));
-    const saved = new Map((data.feedback || []).map((x) => [`${x.meal_id}|${x.member_id}`, x]));
+    if (!status.isConnected) return;
+    const dishes = dishGroups(weekData.meals || []);
+    const mine = (data.feedback || []).filter((x) => String(x.member_id) === String(me?.id));
+    dishes.forEach((dish) => {
+      const ids = new Set(dish.meals.map((m) => String(m.id)));
+      dish.saved = { ...(mine.find((x) => ids.has(String(x.meal_id))) || {}) };
+    });
 
-    status.textContent = `${weekRange(activeWeekStart)} · блюд: ${meals.length}`;
-    if (!meals.length) {
+    if (!dishes.length) {
+      status.textContent = weekRange(activeWeekStart);
       content.innerHTML = "<p>Для этой недели ещё нет меню.</p>";
       return;
     }
+    const drawStatus = () => {
+      const rated = dishes.filter((d) => d.saved.taste).length;
+      status.textContent = `${weekRange(activeWeekStart)} · оценено ${rated} из ${dishes.length}` + (me?.name ? ` · оценивает ${me.name}` : "");
+    };
+    drawStatus();
 
-    content.innerHTML = meals.map((meal) => `
-      <details class="feedback-meal">
-        <summary><b>${escapeHtml(dayTitle(String(meal.meal_date).slice(0, 10) + "T12:00:00"))}</b> · ${escapeHtml(mealTypeLabel(meal.meal_type))}<br><span style="color:var(--text)">${escapeHtml(meal.title)}</span></summary>
-        <div class="feedback-grid">
-          ${people.map((person) => feedbackForm(meal, person, saved.get(`${meal.id}|${person.id}`) || {})).join("")}
-        </div>
-      </details>
-    `).join("");
+    const chips = (field, x, i) => '<div class="fb-chips' + (field === "taste" ? " fb-taste" : "") + '">' + FB_CHOICES[field].map(([value, icon, label]) =>
+      '<button type="button" class="fb-chip' + (x[field] === value ? " on" : "") + '" data-dish="' + i + '" data-field="' + field + '" data-value="' + value + '">' +
+      (icon ? '<span aria-hidden="true">' + icon + "</span>" : "") + escapeHtml(label) + "</button>").join("") + "</div>";
 
-    content.querySelectorAll("[data-feedback-save]").forEach((button) => {
-      button.addEventListener("click", saveFeedback);
-    });
+    content.innerHTML = dishes.map((dish, i) => {
+      const x = dish.saved;
+      const days = [...new Set(dish.meals.map((m) => shortDay(m.meal_date)))].join(", ");
+      const types = [...new Set(dish.meals.map((m) => mealTypeLabel(m.meal_type)))].join(", ");
+      return '<article class="fb-dish' + (x.taste ? " rated" : "") + '" data-dish-card="' + i + '">' +
+        '<div class="fb-head"><div><b>' + escapeHtml(dish.title) + '</b><small>' + escapeHtml(types + " · " + days) + '</small></div><span class="fb-done" aria-hidden="true">✓</span></div>' +
+        chips("taste", x, i) +
+        '<details class="fb-more"' + (x.portion || x.action || x.comment ? " open" : "") + '><summary>Порция, частота, комментарий</summary>' +
+        '<div class="fb-label">Порция</div>' + chips("portion", x, i) +
+        '<div class="fb-label">Как часто готовить</div>' + chips("action", x, i) +
+        '<textarea rows="2" maxlength="2000" data-dish-comment="' + i + '" placeholder="Комментарий, например: меньше соли">' + escapeHtml(x.comment || "") + "</textarea>" +
+        "</details>" +
+        '<div class="fb-save muted" data-dish-status="' + i + '" role="status"></div></article>';
+    }).join("");
+
+    const save = async (i) => {
+      const dish = dishes[i];
+      const line = content.querySelector('[data-dish-status="' + i + '"]');
+      const card = content.querySelector('[data-dish-card="' + i + '"]');
+      line.textContent = "Сохраняем…";
+      try {
+        await api("feedback.save", {
+          meal_id: dish.saved.meal_id || dish.meals[0].id, // старую оценку обновляем на месте, без дубля
+          member_id: me?.id,
+          taste: dish.saved.taste || null,
+          portion: dish.saved.portion || null,
+          action: dish.saved.action || null,
+          comment: (dish.saved.comment || "").trim() || null,
+        });
+        if (!line.isConnected) return;
+        line.textContent = "Сохранено ✓";
+        card.classList.toggle("rated", Boolean(dish.saved.taste));
+        drawStatus();
+        haptic("light");
+      } catch (error) {
+        if (line.isConnected) line.textContent = "Не сохранилось: " + error.message;
+      }
+    };
+
+    content.querySelectorAll(".fb-chip").forEach((btn) => btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.dish);
+      const field = btn.dataset.field;
+      const dish = dishes[i];
+      dish.saved[field] = dish.saved[field] === btn.dataset.value ? null : btn.dataset.value; // повторное нажатие снимает выбор
+      content.querySelectorAll('.fb-chip[data-dish="' + i + '"][data-field="' + field + '"]').forEach((b) =>
+        b.classList.toggle("on", b.dataset.value === dish.saved[field]));
+      save(i);
+    }));
+    content.querySelectorAll("[data-dish-comment]").forEach((area) => area.addEventListener("change", () => {
+      const i = Number(area.dataset.dishComment);
+      dishes[i].saved.comment = area.value;
+      save(i);
+    }));
   } catch (error) {
-    status.textContent = "Ошибка: " + error.message;
-  }
-}
-
-function feedbackForm(meal, person, x) {
-  const key = `${meal.id}|${person.id}`;
-  return `
-    <div class="subcard" data-feedback-box="${escapeHtml(key)}">
-      <b>${escapeHtml(person.role === "wife" ? "Жена" : "Муж")} · ${escapeHtml(person.name)}</b>
-      <select data-f="taste" style="${inputStyle("margin-top:7px")}">
-        <option value="">Вкус — не оценён</option>
-        <option value="liked" ${x.taste === "liked" ? "selected" : ""}>👍 понравилось</option>
-        <option value="neutral" ${x.taste === "neutral" ? "selected" : ""}>😐 нормально</option>
-        <option value="disliked" ${x.taste === "disliked" ? "selected" : ""}>👎 не понравилось</option>
-      </select>
-      <select data-f="portion" style="${inputStyle("margin-top:7px")}">
-        <option value="">Порция — не оценена</option>
-        <option value="too_little" ${x.portion === "too_little" ? "selected" : ""}>мало</option>
-        <option value="ok" ${x.portion === "ok" ? "selected" : ""}>нормально</option>
-        <option value="too_much" ${x.portion === "too_much" ? "selected" : ""}>много</option>
-      </select>
-      <label>Сытость 0–10
-        <input data-f="satiety" type="number" min="0" max="10" value="${escapeHtml(x.satiety ?? "")}" style="${inputStyle("margin-top:4px")}">
-      </label>
-      <label class="checkline"><input data-f="snack_eaten" type="checkbox" ${x.snack_eaten ? "checked" : ""}> перекус съеден</label>
-      <label class="checkline"><input data-f="strong_hunger" type="checkbox" ${x.strong_hunger ? "checked" : ""}> был сильный голод</label>
-      <label class="checkline"><input data-f="leftovers" type="checkbox" ${x.leftovers ? "checked" : ""}> осталась еда</label>
-      <select data-f="action" style="${inputStyle()}">
-        <option value="">Частота — без изменения</option>
-        <option value="more_often" ${x.action === "more_often" ? "selected" : ""}>готовить чаще</option>
-        <option value="less_often" ${x.action === "less_often" ? "selected" : ""}>готовить реже</option>
-        <option value="never" ${x.action === "never" ? "selected" : ""}>больше не предлагать</option>
-      </select>
-      <textarea data-f="comment" rows="2" placeholder="Комментарий" style="${inputStyle("resize:vertical")}">${escapeHtml(x.comment || "")}</textarea>
-      <button data-feedback-save="${escapeHtml(key)}">Сохранить отзыв</button>
-      <span data-feedback-status class="muted"></span>
-    </div>
-  `;
-}
-
-async function saveFeedback(event) {
-  const button = event.currentTarget;
-  const [mealId, memberId] = button.dataset.feedbackSave.split("|");
-  const box = document.querySelector(`[data-feedback-box="${mealId}|${memberId}"]`);
-  const get = (name) => box.querySelector(`[data-f="${name}"]`);
-  const status = box.querySelector("[data-feedback-status]");
-  button.disabled = true;
-  status.textContent = "Сохраняем…";
-  try {
-    await api("feedback.save", {
-      meal_id: mealId,
-      member_id: memberId,
-      taste: get("taste").value || null,
-      portion: get("portion").value || null,
-      satiety: get("satiety").value === "" ? null : Number(get("satiety").value),
-      snack_eaten: get("snack_eaten").checked,
-      strong_hunger: get("strong_hunger").checked,
-      leftovers: get("leftovers").checked,
-      action: get("action").value || null,
-      comment: get("comment").value.trim() || null,
-    });
-    status.textContent = "Сохранено";
-  } catch (error) {
-    status.textContent = "Ошибка: " + error.message;
-  } finally {
-    button.disabled = false;
+    if (status.isConnected) status.textContent = "Ошибка: " + error.message;
   }
 }
 
