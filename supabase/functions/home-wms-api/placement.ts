@@ -122,6 +122,42 @@ export function cellFill(cell: Pick<CellInfo, "storageType" | "width" | "height"
   return { ratio: used / capacity, free: capacity - used, capacity, unit: "cm3" };
 }
 
+/** Толщина полки, см. */
+export const BOARD_CM = 2;
+
+/**
+ * Полезная высота ячеек одной секции — по высотам от пола, а не по записанной высоте
+ * (её часто вписывают с запасом, и тогда полки «налезают» друг на друга).
+ * - полка/ящик под другой полкой: до этой полки (минус доска);
+ * - полка под штангой: записанная высота, но не выше штанги (над ней висит одежда);
+ * - самая верхняя полка: записанная высота (над ней доски нет);
+ * - штанга: записанное место под вешалки, но не ниже верха полки или штанги под ней.
+ */
+export function clearHeights(cells: { id: string; from: number; height: number | null; type: string }[]): Map<string, number | null> {
+  const out = new Map<string, number | null>();
+  const sorted = [...cells].sort((a, b) => a.from - b.from);
+  const isHang = (c: { type: string }) => c.type === "rod" || c.type === "hook";
+  const round = (v: number) => Math.round(v * 10) / 10;
+  for (const c of sorted) {
+    const above = sorted.find((o) => o.from > c.from);
+    const below = [...sorted].reverse().find((o) => o.from < c.from);
+    if (isHang(c)) {
+      // пол под вешалками: верх полки под штангой или чуть выше нижней штанги
+      const floor = !below ? 0 : isHang(below) ? below.from + 3 : below.from + (out.get(below.id) ?? 0) + BOARD_CM;
+      const want = c.height && c.height > 0 ? c.height : 100;
+      out.set(c.id, round(Math.max(5, Math.min(want, c.from - floor))));
+    } else if (above && !isHang(above)) {
+      out.set(c.id, round(Math.max(3, above.from - BOARD_CM - c.from)));
+    } else if (above) {
+      const room = above.from - 3 - c.from;
+      out.set(c.id, round(Math.max(3, c.height && c.height > 0 ? Math.min(c.height, room) : room / 2)));
+    } else {
+      out.set(c.id, c.height);
+    }
+  }
+  return out;
+}
+
 /** Твёрдая вещь влезает, если её стороны (в любом повороте) не больше сторон ячейки. */
 function fitsRigid(item: Size, cell: Size): boolean {
   const a = [item.width, item.height, item.depth].sort((x, y) => x - y);

@@ -121,3 +121,27 @@ test("placement: ironing board does not go onto a 1-metre-high space that is nar
   const board = { name: "Гладильная доска", category: "Хозяйство", usage: "weekly" as const, weight: "medium" as const, canHang: false, canFold: false, hazardous: false, size: { width: 140, height: 38, depth: 6 } };
   assert.equal(suggestPlacements(board, [cell]).length, 0);
 });
+
+test("высота полки считается по высотам от пола, а не по записанной", async () => {
+  const { clearHeights } = await import("../supabase/functions/home-wms-api/placement.ts");
+  const c = (id: string, from: number, height: number | null, type = "shelf") => ({ id, from, height, type });
+  // Шкаф под варочной панелью: полка 1 на 19 см «высотой 29», полка 2 уже на 46 см.
+  let h = clearHeights([c("p1", 19, 29), c("p2", 46, 19), c("p3", 75, 7, "drawer")]);
+  assert.equal(h.get("p1"), 25); // 46 − 2 (доска) − 19
+  assert.equal(h.get("p2"), 27);
+  assert.equal(h.get("p3"), 7); // верхняя — записанная
+  // Прихожая, секция 2: полка на 54, штанга на 193 с местом 110 см, полка на 222.
+  h = clearHeights([c("s3", 54, 35), c("rod", 193, 110, "rod"), c("top", 222, 29)]);
+  assert.equal(h.get("s3"), 35); // под штангой — записанная, влезает
+  assert.equal(h.get("rod"), 102); // вешалки до верха полки: 193 − (54 + 35 + 2)
+  assert.equal(h.get("top"), 29);
+  // Спальня, секция 3: две штанги — верхняя не висит на нижнюю.
+  h = clearHeights([c("r1", 118, 110, "rod"), c("r2", 190, 85, "rod"), c("sh", 210, 48)]);
+  assert.equal(h.get("r1"), 110);
+  assert.equal(h.get("r2"), 69); // 190 − (118 + 3)
+  // Спальня, секция 1: полка на 40 «высотой 50», штанга на 150 «110» — полку не сплющивает.
+  h = clearHeights([c("a", 8, 32), c("b", 40, 50), c("rod", 150, 110, "rod"), c("t", 210, 48)]);
+  assert.equal(h.get("a"), 30);
+  assert.equal(h.get("b"), 50);
+  assert.equal(h.get("rod"), 58);
+});

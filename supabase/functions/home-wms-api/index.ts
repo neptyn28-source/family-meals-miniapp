@@ -4,7 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyInitData } from "../_shared/telegram.ts";
 import { shapeWmsItems, type WmsItemRow } from "./items.ts";
-import { cellFill, suggestPlacements, type CellInfo, type ItemProfile, type Size, type StoredItem } from "./placement.ts";
+import { cellFill, clearHeights, suggestPlacements, type CellInfo, type ItemProfile, type Size, type StoredItem } from "./placement.ts";
 import { analyzeItem, BASE_CATEGORIES } from "./intake.ts";
 import { choosePlacements } from "./ai-placement.ts";
 import { groupModules, parseFurnitureUpdate } from "./plan.ts";
@@ -156,6 +156,7 @@ function profile(value: unknown): ItemProfile {
 
 type CellWithItemsRow = {
   id: string;
+  module_id: string;
   label: string;
   height_from_floor_cm: number | string;
   width_cm: number | string | null;
@@ -171,11 +172,11 @@ type CellWithItemsRow = {
 const num = (v: number | string | null) => (v === null ? null : Number(v));
 
 /** Заполненность ячейки для экрана (0…1, округлённо); null — у полки нет размеров. */
-function fillOf(c: PlanModuleRow["wms_cells"][number]): number | null {
+function fillOf(c: PlanModuleRow["wms_cells"][number], height: number | null): number | null {
   const f = cellFill({
     storageType: (c.storage_type || "shelf") as CellInfo["storageType"],
     width: num(c.width_cm),
-    height: num(c.height_cm),
+    height,
     depth: num(c.depth_cm),
     items: c.wms_items ?? [],
   });
@@ -353,22 +354,28 @@ async function main(req: Request) {
           sections: modules
             .filter((m) => m.furniture_id === f.id)
             .sort(byPosition)
-            .map((m) => ({
-              id: m.id,
-              name: m.name,
-              noShelves: m.no_shelves,
-              cells: (m.wms_cells ?? []).sort(byPosition).map((c) => ({
-                id: c.id,
-                label: c.label,
-                from: Number(c.height_from_floor_cm),
-                width: n(c.width_cm),
-                depth: n(c.depth_cm),
-                height: n(c.height_cm),
-                type: c.storage_type || "shelf",
-                items: (c.wms_items ?? []).map((i) => ({ id: i.id, name: i.name, quantity: i.quantity })),
-                fill: fillOf(c),
-              })),
-            })),
+            .map((m) => {
+              // Высота полки — по высотам от пола (до следующей полки), а не по записанной.
+              const heights = clearHeights((m.wms_cells ?? []).map((c) => ({
+                id: c.id, from: Number(c.height_from_floor_cm), height: n(c.height_cm), type: c.storage_type || "shelf",
+              })));
+              return {
+                id: m.id,
+                name: m.name,
+                noShelves: m.no_shelves,
+                cells: (m.wms_cells ?? []).sort(byPosition).map((c) => ({
+                  id: c.id,
+                  label: c.label,
+                  from: Number(c.height_from_floor_cm),
+                  width: n(c.width_cm),
+                  depth: n(c.depth_cm),
+                  height: heights.get(c.id) ?? null,
+                  type: c.storage_type || "shelf",
+                  items: (c.wms_items ?? []).map((i) => ({ id: i.id, name: i.name, quantity: i.quantity })),
+                  fill: fillOf(c, heights.get(c.id) ?? null),
+                })),
+              };
+            }),
         }))
         .filter((f) => f.sections.length > 0)
         .sort(byPosition);
@@ -472,11 +479,20 @@ async function main(req: Request) {
       const { data, error } = await db
         .from("wms_cells")
         .select(
-          "id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, storage_type, allowed_categories, wms_modules(name, wms_locations(name)), wms_items(category, name, quantity, width_cm, height_cm, depth_cm)",
+          "id, module_id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, storage_type, allowed_categories, wms_modules(name, wms_locations(name)), wms_items(category, name, quantity, width_cm, height_cm, depth_cm)",
         )
         .eq("family_id", familyId);
       if (error) throw error;
-      const cells: CellInfo[] = (data as unknown as CellWithItemsRow[]).map((c) => ({
+      const rowsAll = data as unknown as CellWithItemsRow[];
+      // Полезная высота — по высотам от пола внутри каждой секции.
+      const heights = new Map<string, number | null>();
+      for (const moduleId of new Set(rowsAll.map((c) => c.module_id))) {
+        const hs = clearHeights(rowsAll.filter((c) => c.module_id === moduleId).map((c) => ({
+          id: c.id, from: Number(c.height_from_floor_cm), height: num(c.height_cm), type: c.storage_type || "shelf",
+        })));
+        hs.forEach((v, k) => heights.set(k, v));
+      }
+      const cells: CellInfo[] = rowsAll.map((c) => ({
         id: c.id,
         location: c.wms_modules?.wms_locations?.name ?? "",
         module: c.wms_modules?.name ?? "",
@@ -484,7 +500,7 @@ async function main(req: Request) {
         heightFromFloor: Number(c.height_from_floor_cm),
         width: num(c.width_cm),
         depth: num(c.depth_cm),
-        height: num(c.height_cm),
+        height: heights.get(c.id) ?? null,
         zone: c.zone_type,
         storageType: c.storage_type,
         allowedCategories: c.allowed_categories,
