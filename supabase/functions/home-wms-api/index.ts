@@ -4,7 +4,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyInitData } from "../_shared/telegram.ts";
 import { shapeWmsItems, type WmsItemRow } from "./items.ts";
-import { suggestPlacements, type CellInfo, type ItemProfile, type Size } from "./placement.ts";
+import { cellFill, suggestPlacements, type CellInfo, type ItemProfile, type Size, type StoredItem } from "./placement.ts";
 import { analyzeItem, BASE_CATEGORIES } from "./intake.ts";
 import { choosePlacements } from "./ai-placement.ts";
 import { groupModules, parseFurnitureUpdate } from "./plan.ts";
@@ -106,7 +106,7 @@ type PlanModuleRow = {
     height_cm: number | string | null;
     storage_type: string | null;
     position: number;
-    wms_items: { id: string; name: string; quantity: number }[];
+    wms_items: { id: string; name: string; quantity: number; category: string | null; width_cm: number | null; height_cm: number | null; depth_cm: number | null }[];
   }[];
 };
 type FurnitureRow = {
@@ -119,6 +119,7 @@ type FurnitureRow = {
   depth_cm: number | string | null;
   rotation: number;
   position: number;
+  list_only: boolean;
 };
 
 const USAGES = ["daily", "weekly", "monthly", "rare"] as const;
@@ -164,13 +165,27 @@ type CellWithItemsRow = {
   storage_type: CellInfo["storageType"];
   allowed_categories: string[] | null;
   wms_modules: { name: string; wms_locations: { name: string } | null } | null;
-  wms_items: { category: string | null; name: string }[];
+  wms_items: StoredItem[];
 };
 
 const num = (v: number | string | null) => (v === null ? null : Number(v));
 
+/** Заполненность ячейки для экрана (0…1, округлённо); null — у полки нет размеров. */
+function fillOf(c: PlanModuleRow["wms_cells"][number]): number | null {
+  const f = cellFill({
+    storageType: (c.storage_type || "shelf") as CellInfo["storageType"],
+    width: num(c.width_cm),
+    height: num(c.height_cm),
+    depth: num(c.depth_cm),
+    items: c.wms_items ?? [],
+  });
+  return f ? Math.round(f.ratio * 100) / 100 : null;
+}
+
 /** Ключ Groq: имя секрета пишут по-разному (Groq/Grok, с пробелом, строчными) — ищем любой секрет со словом groq/grok. */
 function groqKey(): string | undefined {
+  const exact = Deno.env.get("GROQ_API_KEY");
+  if (exact) return exact;
   let env: Record<string, string> = {};
   try {
     env = Deno.env.toObject();
@@ -268,7 +283,7 @@ async function main(req: Request) {
     // Визуальный план: квартира, мебель на ней и полки с вещами — одним ответом.
     if (action === "wms.plan.load") {
       const moduleSelect =
-        "id, name, location_id, position, no_shelves, furniture_id, wms_cells(id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, storage_type, position, wms_items(id, name, quantity))";
+        "id, name, location_id, position, no_shelves, furniture_id, wms_cells(id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, storage_type, position, wms_items(id, name, quantity, category, width_cm, height_cm, depth_cm))";
       const loadModules = async () => {
         const { data, error } = await db.from("wms_modules").select(moduleSelect).eq("family_id", familyId);
         if (error) throw error;
@@ -277,7 +292,7 @@ async function main(req: Request) {
       const loadFurniture = async () => {
         const { data, error } = await db
           .from("wms_furniture")
-          .select("id, location_id, name, x_m, y_m, width_cm, depth_cm, rotation, position")
+          .select("id, location_id, name, x_m, y_m, width_cm, depth_cm, rotation, position, list_only")
           .eq("family_id", familyId);
         if (error) throw error;
         return (data ?? []) as FurnitureRow[];
@@ -293,7 +308,7 @@ async function main(req: Request) {
             const { data, error } = await db
               .from("wms_furniture")
               .insert({ family_id: familyId, location_id: draft.location_id, name: draft.name, position: draft.position })
-              .select("id, location_id, name, x_m, y_m, width_cm, depth_cm, rotation, position")
+              .select("id, location_id, name, x_m, y_m, width_cm, depth_cm, rotation, position, list_only")
               .single();
             if (error) throw error;
             target = data as FurnitureRow;
@@ -329,6 +344,7 @@ async function main(req: Request) {
           depth: n(f.depth_cm),
           rotation: f.rotation,
           position: f.position,
+          listOnly: !!f.list_only,
           sections: modules
             .filter((m) => m.furniture_id === f.id)
             .sort(byPosition)
@@ -345,6 +361,7 @@ async function main(req: Request) {
                 height: n(c.height_cm),
                 type: c.storage_type || "shelf",
                 items: (c.wms_items ?? []).map((i) => ({ id: i.id, name: i.name, quantity: i.quantity })),
+                fill: fillOf(c),
               })),
             })),
         }))
@@ -450,7 +467,7 @@ async function main(req: Request) {
       const { data, error } = await db
         .from("wms_cells")
         .select(
-          "id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, storage_type, allowed_categories, wms_modules(name, wms_locations(name)), wms_items(category, name)",
+          "id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, zone_type, storage_type, allowed_categories, wms_modules(name, wms_locations(name)), wms_items(category, name, quantity, width_cm, height_cm, depth_cm)",
         )
         .eq("family_id", familyId);
       if (error) throw error;

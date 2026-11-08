@@ -94,7 +94,7 @@ test("Gemini перегружен совсем — отвечает Groq", async
     })));
   };
   const res = await choosePlacements(PRINTER, candidates, CELLS, { gemini: "g", groq: "q" }, "m", fetcher);
-  assertEquals(urls.filter((u) => u.includes("googleapis")).length, 2);
+  assertEquals(urls.filter((u) => u.includes("googleapis")).length, 1); // при 503 запасную Gemini не ждём
   assertEquals(urls.at(-1), "https://api.groq.com/openai/v1/chat/completions");
   assertEquals(groqBody.includes("json_object"), true);
   assertEquals([res[0].by, res[0].reasons[0]], ["ai", "сухо и под рукой"]);

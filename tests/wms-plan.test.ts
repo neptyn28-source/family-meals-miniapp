@@ -37,10 +37,12 @@ test("plan: grouping keeps rooms apart and order by position", () => {
 
 test("plan: furniture update accepts placement, size and rotation", () => {
   const u = parseFurnitureUpdate({ id: L1, x: 8.391234, y: 2.88, width: 175, depth: 80, rotation: 3 });
-  assert.deepEqual(u, { id: L1, x_m: 8.391, y_m: 2.88, width_cm: 175, depth_cm: 80, rotation: 3 });
+  assert.deepEqual(u, { id: L1, x_m: 8.391, y_m: 2.88, width_cm: 175, depth_cm: 80, rotation: 3, list_only: false });
   const off = parseFurnitureUpdate({ id: L1, x: null, y: null, width: null, depth: null });
   assert.equal(off.x_m, null);
   assert.equal(off.rotation, 0);
+  // «оставить списком»: предмет не на плане и больше не просится на план
+  assert.equal(parseFurnitureUpdate({ id: L1, x: null, y: null, listOnly: true }).list_only, true);
 });
 
 test("plan: furniture update rejects bad input", () => {
@@ -51,6 +53,8 @@ test("plan: furniture update rejects bad input", () => {
     { id: L1, x: 1, y: 1, depth: 1000 },
     { id: L1, x: 1, y: 1, rotation: 4 },
     { id: L1, x: "1", y: 1 },
+    { id: L1, x: 1, y: 1, listOnly: true },
+    { id: L1, x: null, y: null, listOnly: "yes" },
     { id: L1, x: Number.NaN, y: 1 },
   ]) {
     assert.throws(() => parseFurnitureUpdate(bad as Record<string, unknown>), /bad_furniture/, JSON.stringify(bad));

@@ -24,9 +24,9 @@ export function intakePrompt(text: string, categories: string[]): string {
     "usage — как часто такой вещью обычно пользуются: daily, weekly, monthly или rare (сезонное — rare);",
     "weight — light (до 1 кг), medium (1–5 кг) или heavy (больше 5 кг);",
     "can_hang — можно ли хранить на вешалке на штанге (одежда, сумки);",
-    "can_fold — мягкая ли вещь, можно ли её сложить или сжать (ткань, одежда, пледы);",
+    "can_fold — мягкая ли вещь, которую можно сложить или сжать как ткань (одежда, пледы, сумки из ткани). Жёсткие складные вещи (гладильная доска, стремянка, стул, сушилка, коляска, самокат) — false: у них складываются только ножки, а длина остаётся;",
     "hazardous — опасна ли для ребёнка 2 лет: бытовая химия, лекарства, острое, батарейки, мелкие детали;",
-    "width_cm, height_cm, depth_cm — примерные габариты в сантиметрах, как вещь лежит или висит. Оцени их обязательно, даже если есть только название: возьми типичный размер такой вещи.",
+    "width_cm, height_cm, depth_cm — примерные габариты в сантиметрах, как вещь лежит или висит; складную жёсткую вещь — в сложенном виде (гладильная доска сложенная ≈ 120–140 × 35–40 × 5–8). Оцени их обязательно, даже если есть только название: возьми типичный размер такой вещи.",
     text ? `Описание от человека: «${text}».` : "Описания нет — только фото.",
   ].join("\n");
 }
@@ -68,7 +68,8 @@ export function parseIntake(raw: unknown, text: string, categories: string[]): I
     usage,
     weight,
     canHang: r.can_hang === true,
-    canFold: r.can_fold === true,
+    // Жёсткие складные вещи модель путает с мягкими: доска «складывается», но только ножками.
+    canFold: r.can_fold === true && !RIGID_FOLDING.test(name.toLowerCase()),
     // Опасность лучше перестраховать: категории химии и лекарств опасны всегда.
     hazardous: r.hazardous === true || category === "Бытовая химия" || category === "Лекарства",
     size,
@@ -76,6 +77,9 @@ export function parseIntake(raw: unknown, text: string, categories: string[]): I
     aiUsed: Object.keys(r).length > 0,
   };
 }
+
+/** Складываются, но не сжимаются: длина остаётся прежней. */
+export const RIGID_FOLDING = /гладильн|стремянк|лестниц|стул|табурет|сушилк|коляск|самокат|велосипед|раскладушк|мольберт|столик|ёлк|елк|зонт|удочк|лыж|сноуборд|санк/;
 
 export function fallbackName(text: string): string {
   const t = text.trim().replace(/\s+/g, " ");
@@ -103,6 +107,18 @@ export function hasAi(keys: AiKeys): boolean {
 }
 
 const RETRY_STATUSES = [404, 429, 500, 502, 503, 504];
+/** Gemini перегружен или кончилась квота — запасная модель Gemini обычно тоже не ответит; если есть Groq — сразу к нему. */
+const OVERLOAD_STATUSES = [429, 503];
+/** Меньше этого времени на запрос не тратим: ответ всё равно не успеет прийти. */
+const MIN_CALL_MS = 1500;
+
+export type AskOpts = { temperature: number; timeoutMs: number; budgetMs?: number; label: string };
+
+/** Сколько можно ждать очередной запрос: не дольше timeoutMs и не дольше общего срока. 0 — время вышло. */
+export function callTimeout(deadline: number, timeoutMs: number, now = Date.now()): number {
+  const left = Math.min(timeoutMs, deadline - now);
+  return left < MIN_CALL_MS ? 0 : left;
+}
 
 /**
  * Запрос к ИИ с JSON-ответом. Сначала Gemini (основная модель, потом запасная), потом Groq.
@@ -113,12 +129,16 @@ export async function askGemini(
   schema: unknown,
   keys: AiKeys,
   model: string,
-  opts: { temperature: number; timeoutMs: number; label: string },
+  opts: AskOpts,
   fetcher: Fetcher = fetch,
 ): Promise<unknown | null> {
   const k = keysOf(keys);
+  // Общий срок на все попытки: человек ждёт ответа на экране, дальше — ручной ввод/правила.
+  const deadline = Date.now() + (opts.budgetMs ?? opts.timeoutMs * 2);
   if (k.gemini) {
     const call = (m: string, thinking: boolean) => {
+      const ms = callTimeout(deadline, opts.timeoutMs);
+      if (!ms) throw new Error("deadline");
       const generationConfig: Record<string, unknown> = {
         temperature: opts.temperature,
         responseMimeType: "application/json",
@@ -129,7 +149,7 @@ export async function askGemini(
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": k.gemini! },
         body: JSON.stringify({ contents: [{ parts }], generationConfig }),
-        signal: AbortSignal.timeout(opts.timeoutMs),
+        signal: AbortSignal.timeout(ms),
       });
     };
     for (const m of [...new Set([model, BACKUP_MODEL])]) {
@@ -141,6 +161,7 @@ export async function askGemini(
         }
         if (!res.ok) {
           console.error(`${opts.label} ${m} failed`, res.status, (await res.text()).slice(0, 300));
+          if (OVERLOAD_STATUSES.includes(res.status) && k.groq) break;
           if (RETRY_STATUSES.includes(res.status)) continue;
           break;
         }
@@ -148,10 +169,11 @@ export async function askGemini(
         return JSON.parse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "null");
       } catch (err) {
         console.error(`${opts.label} ${m} failed`, err);
+        if (!callTimeout(deadline, opts.timeoutMs)) break;
       }
     }
   }
-  if (k.groq) return askGroq(parts, schema, k.groq, k.groqModel, opts, fetcher);
+  if (k.groq) return askGroq(parts, schema, k.groq, k.groqModel, opts, deadline, fetcher);
   return null;
 }
 
@@ -161,7 +183,8 @@ async function askGroq(
   schema: unknown,
   apiKey: string,
   preferred: string | undefined,
-  opts: { temperature: number; timeoutMs: number; label: string },
+  opts: AskOpts,
+  deadline: number,
   fetcher: Fetcher,
 ): Promise<unknown | null> {
   const text = parts.map((p) => (p as { text?: string })?.text).filter(Boolean).join("\n");
@@ -171,6 +194,11 @@ async function askGroq(
   const shape = isArray ? { type: "OBJECT", properties: { items: schema }, required: ["items"] } : schema;
   const prompt = text + "\n\nОтветь строго одним JSON-объектом по этой схеме (типы в стиле Google): " + JSON.stringify(shape);
   for (const m of [...new Set([preferred, ...GROQ_MODELS].filter((x): x is string => !!x))]) {
+    const ms = callTimeout(deadline, opts.timeoutMs);
+    if (!ms) {
+      console.error(`${opts.label}: время на ИИ вышло`);
+      return null;
+    }
     try {
       const res = await fetcher("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
@@ -184,7 +212,7 @@ async function askGroq(
             { role: "user", content: prompt },
           ],
         }),
-        signal: AbortSignal.timeout(opts.timeoutMs),
+        signal: AbortSignal.timeout(ms),
       });
       if (!res.ok) {
         console.error(`${opts.label} groq ${m} failed`, res.status, (await res.text()).slice(0, 300));
@@ -212,6 +240,6 @@ export async function analyzeItem(
   if (!hasAi(apiKey)) return parseIntake(null, input.text, categories);
   const parts: unknown[] = [{ text: intakePrompt(input.text, categories) }];
   if (input.photo) parts.push({ inline_data: { mime_type: input.photo.mime, data: input.photo.data } });
-  const raw = await askGemini(parts, INTAKE_SCHEMA, apiKey, model, { temperature: 0, timeoutMs: 20000, label: "AI intake" }, fetcher);
+  const raw = await askGemini(parts, INTAKE_SCHEMA, apiKey, model, { temperature: 0, timeoutMs: 9000, budgetMs: 15000, label: "AI intake" }, fetcher);
   return parseIntake(raw, input.text, categories);
 }

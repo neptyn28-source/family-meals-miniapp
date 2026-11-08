@@ -348,6 +348,7 @@ details[open]>*:not(summary){animation:fadeUp .3s var(--ease) both}
 .wp-chips{display:flex;flex-wrap:wrap;gap:6px}
 .wp-chip{padding:8px 12px;border-radius:999px;font-size:13.5px;font-weight:600;background:var(--card-strong);border:1px solid var(--stroke);color:var(--text);min-height:0}
 .wp-chip.off{background:none;border-style:dashed;color:var(--hint)}
+.wp-chip.list{background:none;color:var(--text)}
 .wp-sheet{background:var(--card-strong);border:1px solid var(--stroke);border-radius:var(--radius-sm);padding:14px;display:flex;flex-direction:column;gap:10px;animation:screenIn .3s var(--ease)}
 .wp-sheet-h{display:flex;flex-direction:column;gap:3px}
 .wp-sheet-h b{font-size:16px}
@@ -437,3 +438,23 @@ details[open]>*:not(summary){animation:fadeUp .3s var(--ease) both}
 @media (prefers-reduced-motion:reduce){.wp-fur.pulse,.wf-cell.hit .wf-space,.wf-cell.hit .wf-drawer{animation:none}}
 .wp-row button:not(.primary):not(.wp-edit),.wp-empty button{background:var(--card-strong);color:var(--text);border:1px solid var(--stroke)}
 [data-plan-item]{width:38px;height:38px;padding:0!important;border-radius:12px;font-size:17px;flex:none}
+.wf-leg{fill:var(--wp-wood-edge);opacity:.85}
+.wf-back.open{fill:rgba(36,29,22,.55)}
+.wf-space.open{fill:none;stroke:rgba(207,224,216,.18);stroke-width:.4;stroke-dasharray:2 1.5}
+.wp-layer{display:inline-flex;border:1px solid var(--stroke);border-radius:999px;padding:2px;background:var(--card-strong)}
+.wp .wp-layer button{background:none;border:0;box-shadow:none;min-height:0;padding:8px 14px;border-radius:999px;color:var(--hint);font-weight:700}
+.wp .wp-layer button.on{background:var(--accent);color:var(--accent-ink)}
+.wp-fur.ghost{opacity:.22;pointer-events:none}
+.wp-fur.up .wp-wall{fill:#4f6b74;stroke:#cfe0e6;stroke-dasharray:none;stroke-width:.02}
+.wp-fur.up .wp-wall-ln{stroke:rgba(255,255,255,.35)}
+.wp-wall-shelf{fill:#86704f;stroke:#c2a57c;stroke-width:.012}
+.wp-wall-shelf2{fill:#6b5640;stroke:#c2a57c;stroke-width:.012}
+.wp-fur.is-wall:not(.up) .wp-wall-shelf,.wp-fur.is-wall:not(.up) .wp-wall-shelf2{opacity:.5}
+.wf-bracket{fill:var(--wp-metal)}
+.wf-fillbar{fill:var(--accent)}
+.wf-fillbar.mid{fill:#e8b84a}
+.wf-fillbar.full{fill:var(--danger)}
+.wp-fill{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.wp-fill i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.wp-fill i.mid{background:#e8b84a}
+.wp-fill i.full{background:var(--danger)}

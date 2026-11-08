@@ -54,3 +54,43 @@ test("ошибка Gemini не ломает приёмку", async () => {
   assert.equal(d.name, "Плед");
   assert.equal(d.aiUsed, false);
 });
+
+test("intake: overloaded Gemini (503) goes straight to Groq, skipping the slower backup model", async () => {
+  const { askGemini } = await import("../supabase/functions/home-wms-api/intake.ts");
+  const urls: string[] = [];
+  const fake = async (url: string) => {
+    urls.push(url);
+    if (url.includes("googleapis")) return new Response("overloaded", { status: 503 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"name":"Плед"}' } }] }), { status: 200 });
+  };
+  const r = await askGemini([{ text: "плед" }], { type: "OBJECT" }, { gemini: "g", groq: "q" }, "lite",
+    { temperature: 0, timeoutMs: 5000, budgetMs: 8000, label: "t" }, fake);
+  assert.deepEqual(r, { name: "Плед" });
+  assert.equal(urls.filter((u) => u.includes("googleapis")).length, 1);
+});
+
+test("intake: AI gives up when the overall time budget is spent", async () => {
+  const { askGemini, callTimeout } = await import("../supabase/functions/home-wms-api/intake.ts");
+  assert.equal(callTimeout(10_000, 9000, 9_000), 0); // осталась секунда — не начинаем
+  assert.equal(callTimeout(20_000, 9000, 9_000), 9000);
+  assert.equal(callTimeout(12_000, 9000, 9_000), 3000);
+  let calls = 0;
+  const slow = async (_url: string, init: RequestInit) => {
+    calls++;
+    return await new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+  };
+  const t0 = Date.now();
+  const keepAlive = setInterval(() => {}, 100); // таймер AbortSignal.timeout в Node не держит процесс
+  const r = await askGemini([{ text: "плед" }], { type: "OBJECT" }, { gemini: "g", groq: "q" }, "lite",
+    { temperature: 0, timeoutMs: 1600, budgetMs: 2500, label: "t" }, slow).finally(() => clearInterval(keepAlive));
+  assert.equal(r, null);
+  assert.ok(Date.now() - t0 < 4000, "уложились в общий срок");
+  assert.equal(calls, 1);
+});
+
+test("intake: ironing board is rigid even if the model says it folds", () => {
+  const d = parseIntake({ name: "Гладильная доска", category: "Хозяйство", usage: "weekly", weight: "medium", can_hang: false, can_fold: true, hazardous: false, width_cm: 140, height_cm: 38, depth_cm: 6 }, "", BASE_CATEGORIES);
+  assert.equal(d.canFold, false);
+  const plaid = parseIntake({ name: "Плед", category: "Текстиль", can_fold: true }, "", BASE_CATEGORIES);
+  assert.equal(plaid.canFold, true);
+});

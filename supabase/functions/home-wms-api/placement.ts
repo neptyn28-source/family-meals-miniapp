@@ -37,7 +37,17 @@ export type CellInfo = {
   zone: Zone;
   storageType: StorageType;
   allowedCategories: string[] | null;
-  items: { category: string | null; name?: string }[];
+  items: StoredItem[];
+};
+
+/** Вещь, которая уже лежит в ячейке. Размеры есть не у всех — тогда считаем типовой объём. */
+export type StoredItem = {
+  category: string | null;
+  name?: string;
+  quantity?: number | null;
+  width_cm?: number | string | null;
+  height_cm?: number | string | null;
+  depth_cm?: number | string | null;
 };
 
 export type Suggestion = {
@@ -79,6 +89,37 @@ function norm(value: string | null | undefined): string {
 
 function volume(s: Size): number {
   return s.width * s.height * s.depth;
+}
+
+/** Объём вещи без размеров: коробка обуви/стопка одежды ~ 30×20×12 см. */
+export const UNKNOWN_ITEM_CM3 = 7200;
+/** Вещи не укладываются вплотную: реально занять можно ~85% объёма полки. */
+const PACKING = 0.85;
+/** На штанге одна вешалка занимает ~5 см. */
+const HANGER_CM = 5;
+
+function storedVolume(i: StoredItem): number {
+  const w = Number(i.width_cm), h = Number(i.height_cm), d = Number(i.depth_cm);
+  const one = w > 0 && h > 0 && d > 0 ? w * h * d : UNKNOWN_ITEM_CM3;
+  return one * Math.max(1, Number(i.quantity) || 1);
+}
+
+/**
+ * Заполненность ячейки: сколько места уже занято (0…1+) и сколько можно положить ещё.
+ * Полки и ящики — по объёму, штанга — по числу вешалок. null — у ячейки нет размеров.
+ */
+export function cellFill(cell: Pick<CellInfo, "storageType" | "width" | "height" | "depth" | "items">):
+  { ratio: number; free: number; capacity: number; unit: "cm3" | "hangers" } | null {
+  if (cell.storageType === "rod" || cell.storageType === "hook") {
+    if (!cell.width) return null;
+    const capacity = Math.max(1, Math.floor(cell.width / HANGER_CM));
+    const used = cell.items.reduce((a, i) => a + Math.max(1, Number(i.quantity) || 1), 0);
+    return { ratio: used / capacity, free: capacity - used, capacity, unit: "hangers" };
+  }
+  if (cell.width == null || cell.height == null || cell.depth == null) return null;
+  const capacity = cell.width * cell.height * cell.depth * PACKING;
+  const used = cell.items.reduce((a, i) => a + storedVolume(i), 0);
+  return { ratio: used / capacity, free: capacity - used, capacity, unit: "cm3" };
 }
 
 /** Твёрдая вещь влезает, если её стороны (в любом повороте) не больше сторон ячейки. */
@@ -127,6 +168,18 @@ function judge(item: ItemProfile, cell: CellInfo): Verdict {
     score -= 5;
   }
 
+  // --- Сколько места уже занято другими вещами ---
+  const fill = cellFill(cell);
+  if (fill) {
+    const need = mode === "hang" ? 1 : item.size ? volume(item.size) * (item.canFold ? 0.7 : 1) : UNKNOWN_ITEM_CM3;
+    if (need > fill.free) return { ok: false };
+    const ratioAfter = (fill.capacity - fill.free + need) / fill.capacity;
+    if (fill.ratio >= 0.6) {
+      score -= Math.round((fill.ratio - 0.5) * 40);
+      reasons.push(`полка уже занята на ${Math.min(99, Math.round(fill.ratio * 100))}%`);
+    } else if (ratioAfter > 0.85) score -= 8;
+  }
+
   // --- Баллы ---
   const zoneScore = ZONE_SCORE[item.usage][cell.zone];
   score += zoneScore;
@@ -162,7 +215,7 @@ function judge(item: ItemProfile, cell: CellInfo): Verdict {
   if (cell.items.length === 0) {
     score += 6;
     reasons.push("полка пока свободна");
-  } else if (cell.items.length >= 3) {
+  } else if (!fill && cell.items.length >= 3) {
     score -= 5 * (cell.items.length - 2);
   }
 

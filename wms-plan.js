@@ -12,12 +12,16 @@
   const norm = (s) => String(s ?? "").toLowerCase().replaceAll("ё", "е").trim();
 
   /** Тип мебели по названию — от него зависит картинка. */
+  /** Навесное (висит на стене над напольной мебелью) — рисуется отдельным слоем. */
+  const WALL_KINDS = ["wall", "wallShelves"];
+  const isWall = (f) => WALL_KINDS.includes(f.kind || kindOf(f.name));
+
   function kindOf(name) {
     const n = norm(name);
     const rules = [
       [/угловой диван/, "sofaCorner"], [/диван/, "sofa"], [/кровать/, "bed"], [/купе/, "wardrobe"],
-      [/навесн|над стиральн|над ванн|полки над/, "wall"], [/тумбочк/, "nightstand"], [/место под ванн|ванн(а|ой)$/, "bathtub"],
-      [/раковин|мойк/, "sink"], [/аквариум/, "aquarium"], [/телевиз|тв\b/, "tv"], [/компьютерн|письменн/, "desk"],
+      [/навесн\S* полк|полки лесенк/, "wallShelves"], [/навесн|над стиральн|над ванн|полки над/, "wall"], [/тумбочк/, "nightstand"], [/место под ванн|ванн(а|ой)$/, "bathtub"],
+      [/раковин|мойк/, "sink"], [/аквариум/, "aquarium"], [/телевиз|тв\b/, "tv"], [/(компьютерн|письменн).*стеллаж|стол.*стеллаж/, "deskRack"], [/компьютерн|письменн/, "desk"],
       [/обеденн|стол$/, "dining"], [/косметическ|туалетн/, "vanity"], [/комод/, "dresser"], [/стеллаж/, "rack"],
       [/пуф/, "pouf"], [/бутылочниц/, "bottle"], [/варочн|плит/, "hob"], [/шкаф/, "cabinet"],
     ];
@@ -37,15 +41,26 @@
       return { width: 60, depth: 40, why: "полки без размеров, взял типовой" };
     }
     const n = secs.length;
+    if (kind === "wallShelves") {
+      // Отдельные полки лесенкой: каждая следующая сдвинута на четверть ширины.
+      const shelves = f.sections.flatMap((s) => s.cells || []);
+      const w = Math.max(...shelves.map((c) => c.width || 0)), d = Math.max(...shelves.map((c) => c.depth || 0)) || 25;
+      const k = shelves.length, shift = Math.round(w * 0.25);
+      return { width: r5(w + shift * (k - 1)), depth: r5(d), why: `${k} ${k > 1 && k < 5 ? "полки" : "полок"} по ${w} см лесенкой, сдвиг ~${shift} см` };
+    }
     if (kind === "bed") {
       const w = Math.max(...secs.map((s) => s.w)), d = secs.reduce((a, s) => a + s.d, 0);
       return { width: r5(w + 10), depth: r5(d + 10), why: `${n} отсека по ${secs.map((s) => s.d).join(" + ")} см вдоль кровати, ширина ${w} см, плюс рама` };
     }
     const w = secs.reduce((a, s) => a + (s.w || 30), 0) + 2 * (n + 1);
     const extra = kind === "wardrobe" ? 8 : kind === "sofa" || kind === "sofaCorner" ? 30 : 2;
-    const d = Math.max(...secs.map((s) => s.d || 30)) + extra;
+    // У стола глубину задаёт столешница (самая глубокая полка), а не нижние ящики.
+    const isDesk = kind === "desk" || kind === "deskRack";
+    const deskTop = isDesk ? Math.max(0, ...f.sections.flatMap((s) => (s.cells || []).map((c) => c.depth || 0))) : 0;
+    const d = Math.max(deskTop, ...secs.map((s) => s.d || 30)) + extra;
     const why = (n > 1 ? `секции ${secs.map((s) => s.w).join(" + ")} см` : `полка ${secs[0].w} см`) + " + стенки" +
-      (kind === "wardrobe" ? ", к глубине — двери-купе" : extra === 30 ? ", к глубине — спинка" : "");
+      (kind === "wardrobe" ? ", к глубине — двери-купе" : extra === 30 ? ", к глубине — спинка" : "") +
+      (deskTop > Math.max(...secs.map((s) => s.d || 0)) ? `, глубина по столешнице ${deskTop} см` : "");
     return { width: Math.max(10, r5(w)), depth: Math.max(10, r5(d)), why };
   }
 
@@ -100,6 +115,68 @@
     return null;
   }
 
+  /**
+   * Раскладка «шкаф спереди» в сантиметрах. Каждая полка своей ширины: секция идёт правее того,
+   * что стоит на той же высоте в предыдущих секциях — так видны и ступенчатый стеллаж, и столешница над тумбой.
+   * Высокое пустое место над самой верхней полкой обрезаем до 50 см (это свободное место, а не шкаф).
+   */
+  const OPEN_KINDS = ["desk", "deskRack", "rack", "dining", "vanity"];
+  function frontLayout(f) {
+    const GAP = 2.5, kind = kindOf(f.name), out = [];
+    const span = (c, h) => (c.type === "rod" ? [Math.max(0, c.from - Math.min(h, c.from)), c.from] : [c.from, c.from + h]);
+    const overlaps = (a, b) => Math.min(a[1], b[1]) - Math.max(a[0], b[0]) > 1;
+    let base = GAP;
+    if (kind === "wallShelves") {
+      // Независимые полки на стене лесенкой: без короба, каждая со своим сдвигом и кронштейнами.
+      const all = f.sections.flatMap((s, k) => (s.cells || []).map((c) => ({ c, s, k }))).sort((a, b) => a.c.from - b.c.from);
+      const maxW = Math.max(30, ...all.map((p) => p.c.width || 0)), shift = maxW * 0.25;
+      all.forEach((p, i) => {
+        const w = Math.max(20, p.c.width || maxW);
+        let h = p.c.height || 25;
+        const next = all[i + 1];
+        if (!next && h > 50) h = 50;
+        out.push({ ...p, x: GAP + shift * i, w, h, v: [p.c.from, p.c.from + h], open: false, bracket: true });
+      });
+      const W = Math.max(40, ...out.map((p) => p.x + p.w)) + GAP;
+      return { cells: out, W, top: Math.max(100, ...out.map((p) => p.v[1])) + 6, legs: [], box: null, open: true };
+    }
+    f.sections.forEach((s, k) => {
+      const cells = [...(s.cells || [])].sort((a, b) => a.from - b.from);
+      const bottom = cells[0];
+      const defW = Math.max(30, (bottom && bottom.width) || Math.max(0, ...cells.map((c) => c.width || 0)) || 60);
+      const mine = [];
+      cells.forEach((c, i) => {
+        const w = Math.max(20, c.width || defW);
+        let h = c.height || (c.type === "rod" ? 100 : 8);
+        const above = cells.slice(i + 1).some((o) => o.type !== "rod" && o.from < c.from + h - 1);
+        const open = c.type !== "rod" && !above && i === cells.length - 1 && h > 50;
+        if (open) h = 50;
+        const v = span(c, h);
+        let x = base;
+        for (const p of out) if (p.k < k && overlaps(p.v, v)) x = Math.max(x, p.x + p.w + GAP);
+        const cell = { c, s, k, x, w, h, v, open };
+        out.push(cell); mine.push(cell);
+      });
+      if (mine.length) base = Math.min(...mine.map((m) => m.x + m.w)) + GAP;
+    });
+    const W = Math.max(40, ...out.map((p) => p.x + p.w)) + GAP;
+    const top = Math.max(100, ...out.map((p) => p.v[1])) + 6;
+    // Стойки и ножки: если под краем полки пусто — опора вниз до ближайшей полки или до пола.
+    const legs = [];
+    if (!WALL_KINDS.includes(kind)) for (const p of out) {
+      if (p.c.type === "rod" || p.v[0] < 12) continue;
+      for (const ex of [p.x + 1.2, p.x + p.w - 1.2]) {
+        const below = out.filter((o) => o !== p && o.v[1] <= p.v[0] + 1 && ex >= o.x - 0.5 && ex <= o.x + o.w + 0.5);
+        const floor = below.length ? Math.max(...below.map((o) => o.v[1])) : 0;
+        if (p.v[0] - floor > 3) legs.push({ x: ex, y0: floor, y1: p.v[0] });
+      }
+    }
+    const minFrom = out.length ? Math.min(...out.map((p) => p.v[0])) : 0;
+    const closed = !OPEN_KINDS.includes(kind);
+    const box = closed && out.length ? { x: 0, y0: kind === "wall" ? Math.max(0, minFrom - 2) : 0, y1: Math.max(...out.map((p) => p.v[1])) + 2 } : null;
+    return { cells: out, W, top, legs: closed ? [] : legs, box, open: !closed };
+  }
+
   /** Поиск вещей по всем полкам. */
   function searchItems(furniture, query) {
     const words = norm(query).split(/\s+/).filter(Boolean);
@@ -113,6 +190,20 @@
   }
 
   // ---------- Картинки мебели (вид сверху). Локальные координаты: ширина w, глубина d, фасад снизу. ----------
+  /** Столешница с монитором, клавиатурой и креслом (общая для обычного стола и стола со стеллажом). */
+  function deskTop(x, w, d) {
+    const mw = Math.min(0.62, w * 0.55), cx = x + w / 2;
+    let s = R(x, 0, w, d, "wp-wood", 0.015) + R(x + 0.015, 0.015, w - 0.03, d - 0.03, "wp-top", 0.01);
+    // тумба с ящиками у края столешницы
+    s += Ln(x + w - 0.36, d - 0.03, x + w - 0.36, 0.03, "wp-ln") + Ln(x + w - 0.24, d - 0.025, x + w - 0.12, d - 0.025, "wp-handle");
+    // монитор на подставке, клавиатура, мышь
+    s += R(cx - mw / 2, 0.06, mw, 0.05, "wp-screen", 0.012) + R(cx - 0.07, 0.11, 0.14, 0.06, "wp-kbd", 0.01) +
+      R(cx - 0.21, d * 0.5, 0.42, Math.min(0.13, d * 0.22), "wp-kbd", 0.015) + E(cx + 0.3, d * 0.57, 0.035, 0.05, "wp-kbd");
+    // кресло перед столом: спинка и сиденье
+    const cr = Math.min(0.26, w * 0.22);
+    return s + C(cx, d + cr * 0.9, cr, "wp-chair") + R(cx - cr * 0.9, d + cr * 1.55, cr * 1.8, cr * 0.4, "wp-chair", 0.06);
+  }
+
   const R = (x, y, w, h, cls, rx = 0.02) => `<rect class="${cls}" x="${x}" y="${y}" width="${Math.max(0.001, w)}" height="${Math.max(0.001, h)}" rx="${rx}"/>`;
   const C = (cx, cy, r, cls) => `<circle class="${cls}" cx="${cx}" cy="${cy}" r="${Math.max(0.001, r)}"/>`;
   const Ln = (x1, y1, x2, y2, cls = "wp-ln") => `<line class="${cls}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
@@ -166,10 +257,16 @@
         C(w / 2, d * 0.42, r, "wp-lamp") + C(w / 2, d * 0.42, r * 0.45, "wp-lamp-in") + Ln(w / 2 - 0.05, d - 0.012, w / 2 + 0.05, d - 0.012, "wp-handle");
     },
     desk(w, d) {
-      const mw = Math.min(0.6, w * 0.4);
-      return R(0, 0, w, d, "wp-wood", 0.015) + R(0.015, 0.015, w - 0.03, d - 0.03, "wp-top", 0.01) +
-        R(w / 2 - mw / 2, 0.05, mw, 0.04, "wp-screen", 0.01) + R(w / 2 - 0.22, d * 0.55, 0.44, Math.min(0.14, d * 0.25), "wp-kbd", 0.015) +
-        E(w / 2 + 0.32, d * 0.62, 0.035, 0.05, "wp-kbd") + C(w / 2, d + 0.2, Math.min(0.24, w * 0.2), "wp-chair");
+      return deskTop(0, w, d);
+    },
+    /** Стол со стеллажом: слева стеллаж с полками и коробками, справа столешница с монитором и креслом. */
+    deskRack(w, d) {
+      const rw = Math.min(w * 0.4, Math.max(0.3, w * 0.35)), rd = Math.min(d, 0.32);
+      let s = R(0, 0, rw, rd, "wp-wood", 0.01) + R(0.02, 0.02, rw - 0.04, rd - 0.04, "wp-inner", 0.005);
+      const n = Math.max(2, Math.round(rw / 0.18));
+      for (let i = 1; i < n; i++) s += Ln((rw / n) * i, 0.02, (rw / n) * i, rd - 0.02, "wp-grain");
+      s += R(0.05, 0.05, rw * 0.32, rd * 0.55, "wp-box", 0.008) + R(rw * 0.55, 0.06, rw * 0.3, rd * 0.5, "wp-box2", 0.008);
+      return s + deskTop(rw + 0.01, w - rw - 0.01, d);
     },
     dining(w, d) {
       const n = Math.max(1, Math.round(w / 0.6));
@@ -233,6 +330,12 @@
         C(w * 0.32, d * 0.35, r, "wp-burner") + C(w * 0.68, d * 0.35, r * 0.8, "wp-burner") +
         C(w * 0.32, d * 0.68, r * 0.8, "wp-burner") + C(w * 0.68, d * 0.68, r, "wp-burner");
     },
+    wallShelves(w, d) {
+      const n = 3, bw = w / (1 + 0.25 * (n - 1)), sh = bw * 0.25;
+      let s = "";
+      for (let i = 0; i < n; i++) s += R(sh * i, d * 0.08 * i, bw, d * (1 - 0.08 * (n - 1)), i % 2 ? "wp-wall-shelf2" : "wp-wall-shelf", 0.01);
+      return s;
+    },
     wall(w, d) {
       let s = R(0, 0, w, d, "wp-wall", 0.01);
       const n = Math.max(1, Math.round(w / 0.4));
@@ -245,8 +348,8 @@
     const fw = (f.width ?? f.suggest.width) / 100, fd = (f.depth ?? f.suggest.depth) / 100;
     const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
     const art = (DRAW[f.kind] || DRAW.cabinet)(fw, fd);
-    const label = opts.label && (f.kind !== "wall" || opts.sel) ? labelSvg(f, rect) : "";
-    return `<g class="wp-fur${opts.sel ? " sel" : ""}${opts.pulse ? " pulse" : ""}${f.kind === "wall" ? " is-wall" : ""}" data-fur="${f.id}">` +
+    const label = opts.label && !opts.ghost ? labelSvg(f, rect) : "";
+    return `<g class="wp-fur${opts.sel ? " sel" : ""}${opts.pulse ? " pulse" : ""}${isWall(f) ? " is-wall" : ""}${opts.ghost ? " ghost" : ""}${opts.up ? " up" : ""}" data-fur="${f.id}">` +
       `<rect class="wp-hit" x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${rect.h}"/>` +
       `<g transform="translate(${cx} ${cy}) rotate(${f.rotation * 90}) translate(${-fw / 2} ${-fd / 2})">${art}</g>` +
       (opts.sel ? `<rect class="wp-sel" x="${rect.x - 0.03}" y="${rect.y - 0.03}" width="${rect.w + 0.06}" height="${rect.h + 0.06}" rx="0.04"/>` : "") +
@@ -271,14 +374,14 @@
 
   // ---------- Состояние экрана ----------
   let deps = null, root = null, data = null, view = { k: "plan" }, edit = false, sizing = null, hitCell = null;
-  let tour = [], drag = null, vb = null, anim = null, toastTimer = null, focusItem = null;
+  let tour = [], drag = null, vb = null, anim = null, toastTimer = null, focusItem = null, layer = "floor", pick = null;
   const esc = (s) => (deps ? deps.esc(s) : String(s));
 
   function setDepth() { deps?.onDepth?.(view.k === "plan" ? 0 : view.k === "room" ? 1 : 2); }
 
   async function mount(el, d, opts = {}) {
-    deps = d; root = el; focusItem = opts.focusItemId || null;
-    view = { k: "plan" }; edit = false; sizing = null; hitCell = null; stopTour();
+    deps = d; root = el; focusItem = opts.focusItemId || null; pick = opts.pick || null;
+    view = { k: "plan" }; edit = false; sizing = null; hitCell = null; layer = "floor"; stopTour();
     root.innerHTML = `<div class="wp">
       <div class="wp-search"><input id="wpQ" type="search" placeholder="Где лежит… например, лоферы" autocomplete="off" aria-label="Найти вещь на плане"></div>
       <div class="wp-results" id="wpResults"></div>
@@ -314,7 +417,7 @@
     const plan = res.plan;
     const rooms = plan ? plan.rooms.map((r) => ({ id: r.location_id, name: r.name, parts: r.parts, label: r.label })) : [];
     const furniture = (res.furniture || []).map((f) => {
-      const x = { ...f, kind: kindOf(f.name) };
+      const x = { ...f, listOnly: !!f.listOnly, kind: kindOf(f.name) };
       x.suggest = suggestSize(x);
       return x;
     });
@@ -411,8 +514,10 @@
     for (const o of data.plan.openings || []) h += `<line class="wp-open" x1="${o[0]}" y1="${o[1]}" x2="${o[2]}" y2="${o[3]}"/>`;
     for (const d of data.plan.doors || []) h += `<line class="wp-door-gap" x1="${d[0]}" y1="${d[1]}" x2="${d[2]}" y2="${d[3]}"/>`;
     const list = data.furniture.filter((f) => placed(f) && (!rid || f.locationId === rid));
-    const order = [...list.filter((f) => f.kind !== "wall"), ...list.filter((f) => f.kind === "wall")];
-    for (const f of order) h += furnitureSvg(f, rectOf(f), { label: !!rid, sel: sizing === f.id, pulse: view.pulse === f.id });
+    // Два слоя: на полу и навесное. На общем плане — только то, что стоит на полу.
+    const upper = rid && layer === "wall";
+    for (const f of list.filter((x) => !isWall(x))) h += furnitureSvg(f, rectOf(f), { label: !!rid && !upper, ghost: upper, sel: sizing === f.id, pulse: view.pulse === f.id });
+    if (upper) for (const f of list.filter(isWall)) h += furnitureSvg(f, rectOf(f), { label: true, up: true, sel: sizing === f.id, pulse: view.pulse === f.id });
     if (!rid) {
       for (const r of data.rooms) {
         const [lx, ly] = r.label || bbox(r.parts).slice(0, 2);
@@ -438,24 +543,32 @@
   function renderTray() {
     const tray = root.querySelector("#wpTray");
     if (view.k === "plan") {
-      const total = data.furniture.length, on = data.furniture.filter(placed).length;
-      tray.innerHTML = `<p class="muted">Нажмите на комнату, чтобы открыть её.${on < total ? ` На плане ${on} из ${total} предметов — остальные можно расставить в комнатах.` : ""}</p>`;
+      const total = data.furniture.filter((f) => !f.listOnly).length, on = data.furniture.filter(placed).length;
+      if (pick) { tray.innerHTML = `<p class="muted">Куда положить «${esc(pick.name)}»: откройте комнату, затем шкаф и нажмите на полку.</p>`; return; }
+      tray.innerHTML = `<p class="muted">Нажмите на комнату, чтобы открыть её.${on < total ? ` На плане ${on} из ${total} предметов — остальные можно расставить в комнатах или оставить списком.` : ""}</p>`;
       return;
     }
     const list = data.furniture.filter((f) => f.locationId === view.room);
-    const rest = list.filter((f) => !placed(f));
+    const rest = list.filter((f) => !placed(f) && !f.listOnly), listed = list.filter((f) => f.listOnly);
     if (sizing) return renderSizing(tray);
-    const editBtn = `<button class="wp-edit${edit ? " on" : ""}" data-act="edit">${edit ? "✓ Готово" : "✏️ Править размеры"}</button>`;
+    const hasWall = list.some((f) => isWall(f) && placed(f));
+    const layerBtns = hasWall ? `<div class="wp-layer" role="group" aria-label="Слой">` +
+      `<button data-layer="floor" class="${layer === "floor" ? "on" : ""}">На полу</button>` +
+      `<button data-layer="wall" class="${layer === "wall" ? "on" : ""}">Навесное</button></div>` : "";
+    const editBtn = pick ? "" : `<button class="wp-edit${edit ? " on" : ""}" data-act="edit">${edit ? "✓ Готово" : "✏️ Править размеры"}</button>`;
     if (!edit) {
-      tray.innerHTML = `<div class="wp-row">${editBtn}</div>` +
-        (list.length ? `<div class="wp-chips">${list.map((f) => `<button class="wp-chip${placed(f) ? "" : " off"}" data-open="${f.id}">${placed(f) ? "" : "◌ "}${esc(shortName(f.name))}</button>`).join("")}</div>` : "") +
-        `<p class="muted">${rest.length ? `${rest.length} ${plural(rest.length, "предмет", "предмета", "предметов")} ещё не на плане: нажмите «Править размеры», чтобы расставить. ` : ""}Нажмите на мебель, чтобы заглянуть внутрь.</p>`;
+      tray.innerHTML = `<div class="wp-row">${layerBtns}${editBtn}</div>` +
+        (list.length - listed.length ? `<div class="wp-chips">${list.filter((f) => !f.listOnly).map((f) => `<button class="wp-chip${placed(f) ? "" : " off"}" data-open="${f.id}">${placed(f) ? "" : "◌ "}${esc(shortName(f.name))}</button>`).join("")}</div>` : "") +
+        (listed.length ? `<div class="wp-sub">Списком, без плана</div><div class="wp-chips">${listed.map((f) => `<button class="wp-chip list" data-open="${f.id}">☰ ${esc(shortName(f.name))}</button>`).join("")}</div>` : "") +
+        (pick ? `<p class="muted">Нажмите на шкаф или стеллаж, в который хотите положить «${esc(pick.name)}».</p>` :
+        `<p class="muted">${rest.length ? `${rest.length} ${plural(rest.length, "предмет", "предмета", "предметов")} ещё не на плане: нажмите «Править размеры», чтобы расставить или оставить списком. ` : ""}Нажмите на мебель, чтобы заглянуть внутрь.</p>`);
       return;
     }
-    tray.innerHTML = `<div class="wp-row">${editBtn}</div>` +
+    tray.innerHTML = `<div class="wp-row">${layerBtns}${editBtn}</div>` +
       `<p class="muted">Перетаскивайте мебель пальцем — у стены она прилипает. Нажмите на предмет, чтобы поправить размер или повернуть.</p>` +
       (rest.length ? `<div class="wp-sub">Не на плане</div><div class="wp-chips">${rest.map((f) => `<button class="wp-chip off" data-size="${f.id}">+ ${esc(shortName(f.name))}</button>`).join("")}</div>` : "") +
-      (list.length - rest.length ? `<div class="wp-sub">На плане</div><div class="wp-chips">${list.filter(placed).map((f) => `<button class="wp-chip" data-size="${f.id}">${esc(shortName(f.name))} · ${dimsText(f)}</button>`).join("")}</div>` : "");
+      (listed.length ? `<div class="wp-sub">Только списком</div><div class="wp-chips">${listed.map((f) => `<button class="wp-chip list" data-size="${f.id}">☰ ${esc(shortName(f.name))}</button>`).join("")}</div>` : "") +
+      (list.filter(placed).length ? `<div class="wp-sub">На плане</div><div class="wp-chips">${list.filter(placed).map((f) => `<button class="wp-chip" data-size="${f.id}">${esc(shortName(f.name))} · ${dimsText(f)}</button>`).join("")}</div>` : "");
   }
 
   function dimsText(f) { return `${Math.round(f.width ?? f.suggest.width)}×${Math.round(f.depth ?? f.suggest.depth)}`; }
@@ -466,7 +579,7 @@
     const w = Math.round(f.width ?? f.suggest.width), d = Math.round(f.depth ?? f.suggest.depth);
     const fromDb = f.width !== null && f.width !== undefined;
     tray.innerHTML = `<div class="wp-sheet">
-      <div class="wp-sheet-h"><b>${esc(shortName(f.name))}</b><span class="muted">${fromDb ? "Сохранённый размер" : "Посчитал по полкам: " + esc(f.suggest.why)}</span></div>
+      <div class="wp-sheet-h"><b>${esc(shortName(f.name))}</b><span class="muted">${f.listOnly ? "Сейчас только в списке комнаты, на плане не рисуется. " : ""}${fromDb ? "Сохранённый размер" : "Посчитал по полкам: " + esc(f.suggest.why)}</span></div>
       <div class="wp-sz">
         <label for="wpW">Ширина, см<input id="wpW" type="number" inputmode="numeric" min="10" max="600" value="${w}"></label>
         <label for="wpD">Глубина, см<input id="wpD" type="number" inputmode="numeric" min="10" max="400" value="${d}"></label>
@@ -479,6 +592,7 @@
       <div class="wp-row">
         <button class="primary" data-act="apply">${placed(f) ? "Сохранить" : "Поставить на план"}</button>
         ${placed(f) ? '<button data-act="remove">Убрать с плана</button>' : ""}
+        ${f.listOnly ? "" : '<button data-act="listonly">Оставить списком</button>'}
         <button data-act="cancel">Отмена</button>
       </div></div>`;
   }
@@ -489,23 +603,28 @@
     svg.classList.remove("editing");
     svg.classList.add("front");
     const f = furById(view.fur);
-    const secs = f.sections.map((s) => {
-      const bottom = [...s.cells].sort((a, b) => a.from - b.from)[0];
-      return { ...s, w: Math.max(30, (bottom && bottom.width) || Math.max(0, ...s.cells.map((c) => c.width || 0)) || 60) };
-    });
-    const top = Math.max(100, ...secs.flatMap((s) => s.cells.map((c) => (c.type === "rod" ? c.from : c.from + (c.height || 10))))) + 6;
-    const gap = 2.5, W = secs.reduce((a, s) => a + s.w, 0) + gap * (secs.length + 1);
+    const L = frontLayout(f), W = L.W, top = L.top;
     const Y = (v) => top - v;
     let h = `<g class="wf-ruler">`;
     for (let v = 0; v <= top; v += 50) h += `<line x1="-4" y1="${Y(v)}" x2="${W + 4}" y2="${Y(v)}"/><text x="-7" y="${Y(v) + 2}">${v}</text>`;
     h += `</g>`;
-    h += `<rect class="wf-carcass" x="0" y="${Y(top - 2)}" width="${W}" height="${top - 2}" rx="1.5"/>`;
-    let x = gap;
-    for (const s of secs) {
-      h += `<rect class="wf-back" x="${x}" y="${Y(top - 4)}" width="${s.w}" height="${top - 4}"/>`;
-      s.cells.forEach((c) => { h += cellSvg(c, x, Math.min(s.w, c.width || s.w), Y); });
-      if (secs.length > 1) h += `<text class="wf-sec" x="${x + s.w / 2}" y="${Y(0) + 8}">${esc((s.name.match(/секция\s+\d+/) || [""])[0])}</text>`;
-      x += s.w + gap;
+    if (L.box) h += `<rect class="wf-carcass" x="0" y="${Y(L.box.y1)}" width="${W}" height="${L.box.y1 - L.box.y0}" rx="1.5"/>`;
+    for (const l of L.legs) h += `<rect class="wf-leg" x="${l.x - 1}" y="${Y(l.y1)}" width="2" height="${l.y1 - l.y0}" rx=".4"/>`;
+    for (const p of L.cells) {
+      const y1 = p.v[1], y0 = p.v[0];
+      if (L.box) h += `<rect class="wf-back" x="${p.x}" y="${Y(y1)}" width="${p.w}" height="${y1 - y0}"/>`;
+      else if (!p.open) h += `<rect class="wf-back open" x="${p.x}" y="${Y(y1)}" width="${p.w}" height="${y1 - y0}"/>`;
+    }
+    for (const p of L.cells) {
+      if (p.bracket) for (const bx of [p.x + p.w * 0.18, p.x + p.w * 0.82]) h += `<path class="wf-bracket" d="M${bx - 0.8} ${Y(p.v[0])} h1.6 v6 l-1.6 -2 z"/>`;
+      h += cellSvg(p.c, p.x, p.w, Y, p.h, p.open);
+    }
+    if (f.sections.length > 1) {
+      const seen = new Set();
+      for (const p of L.cells) {
+        if (seen.has(p.k)) continue; seen.add(p.k);
+        h += `<text class="wf-sec" x="${p.x + p.w / 2}" y="${Y(0) + 8}">${esc((p.s.name.match(/секция\s+\d+/) || [""])[0])}</text>`;
+      }
     }
     h += `<line class="wf-kid" x1="-4" y1="${Y(CHILD_LIMIT_CM)}" x2="${W + 4}" y2="${Y(CHILD_LIMIT_CM)}"/><text class="wf-kidt" x="${W + 5}" y="${Y(CHILD_LIMIT_CM) + 2}">150</text>`;
     h += `<line class="wf-floor" x1="-6" y1="${Y(0)}" x2="${W + 6}" y2="${Y(0)}"/>`;
@@ -514,11 +633,12 @@
     const tray = root.querySelector("#wpTray");
     const hit = hitCell && findCellById(f, hitCell);
     tray.innerHTML = hit ? cellSheet(f, hit.s, hit.c) :
+      pick ? `<p class="muted">Нажмите на полку, ящик или штангу, куда положить «${esc(pick.name)}». Полоска внизу полки — насколько она уже занята.</p>` :
       `<p class="muted">Полки и штанги стоят на своей высоте от пола. Красная линия — 150 см: выше ребёнок не дотянется. Нажмите на полку, чтобы увидеть, что на ней.</p>`;
   }
 
-  function cellSvg(c, x, w, Y) {
-    const hh = c.height || 8, hit = hitCell === c.id ? " hit" : "";
+  function cellSvg(c, x, w, Y, visH, open) {
+    const hh = visH || c.height || 8, hit = hitCell === c.id ? " hit" : "";
     const names = groupNames(c.items);
     let g = `<g class="wf-cell${hit}" data-cell="${c.id}">`;
     const chips = (y0, maxRows) => {
@@ -545,11 +665,15 @@
       if (hh >= 16) g += chips(Y(c.from + hh) + 11, Math.max(1, Math.floor((hh - 12) / 6.4)));
       else if (names.length) g += `<circle class="wf-dot" cx="${x + w - 3}" cy="${Y(c.from + hh / 2)}" r="1.6"/>`;
     } else {
-      g += `<rect class="wf-space" x="${x + 0.6}" y="${Y(c.from + hh)}" width="${w - 1.2}" height="${hh}"/>`;
+      g += `<rect class="wf-space${open ? " open" : ""}" x="${x + 0.6}" y="${Y(c.from + hh)}" width="${w - 1.2}" height="${hh}"/>`;
       g += `<rect class="wf-board" x="${x}" y="${Y(c.from)}" width="${w}" height="1.8"/>`;
       const room = Math.max(1, Math.floor((hh - 9) / 6.4));
       g += `<text class="wf-lbl" x="${x + 2}" y="${Y(c.from + hh) + 6}">${esc(c.label)}</text>`;
       g += names.length ? chips(Y(c.from + hh) + 8, room) : "";
+    }
+    if (c.fill != null && c.fill > 0) {
+      const fy = c.type === "rod" ? Y(c.from) + 2.6 : Y(c.from) - 1.6;
+      g += `<rect class="wf-fillbar ${fillClass(c.fill)}" x="${x + 1}" y="${fy}" width="${Math.max(0.8, (w - 2) * Math.min(1, c.fill))}" height="1.1" rx=".5"/>`;
     }
     return g + `<rect class="wf-tap" x="${x}" y="${c.type === "rod" ? Y(c.from) : Y(c.from + hh)}" width="${w}" height="${c.type === "rod" ? Math.max(6, Math.min(hh, c.from)) : Math.max(6, hh)}"/></g>`;
   }
@@ -558,6 +682,13 @@
     const m = new Map();
     for (const i of items) m.set(i.name, (m.get(i.name) || 0) + (i.quantity || 1));
     return [...m].map(([n, q]) => (q > 1 ? `${n} ×${q}` : n));
+  }
+
+  const fillClass = (r) => (r >= 0.9 ? "full" : r >= 0.6 ? "mid" : "low");
+  function fillText(c) {
+    const p = Math.round(c.fill * 100);
+    if (c.type === "rod") return p >= 100 ? "Штанга занята полностью" : `Штанга занята примерно на ${p}%`;
+    return p >= 95 ? "Места почти нет" : `Занято примерно ${p}% места (по размерам вещей)`;
   }
 
   function findCellById(f, id) {
@@ -571,7 +702,9 @@
     const names = groupNames(c.items);
     return `<div class="wp-sheet"><div class="wp-sheet-h"><b>${esc(c.label)} · ${kind}</b>
       <span class="muted">${esc(f.sections.length > 1 ? s.name : shortName(f.name))} · ${where}${c.width ? ` · ${c.width}×${c.depth || "?"} см` : ""}${c.from > CHILD_LIMIT_CM ? " · ребёнок не достанет" : ""}</span></div>
-      ${names.length ? `<ul class="wp-items">${names.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : `<p class="muted">Здесь пока ничего не записано.</p>`}</div>`;
+      ${c.fill != null ? `<div class="wp-fill"><i style="width:${Math.min(100, Math.round(c.fill * 100))}%" class="${fillClass(c.fill)}"></i></div><span class="muted">${fillText(c)}</span>` : ""}
+      ${names.length ? `<ul class="wp-items">${names.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : `<p class="muted">Здесь пока ничего не записано.</p>`}
+      ${pick ? `<button class="primary" data-act="pick">Положить «${esc(pick.name)}» сюда</button>` : ""}</div>`;
   }
 
   // ---------- Жесты ----------
@@ -647,6 +780,14 @@
     if (!b) return;
     if (b.dataset.open) return openFront(b.dataset.open);
     if (b.dataset.size) return openSizing(b.dataset.size);
+    if (b.dataset.layer) { layer = b.dataset.layer; sizing = null; deps.haptic?.("light"); render(); return; }
+    if (b.dataset.act === "pick" && pick && view.k === "front") {
+      const f = furById(view.fur), hit = hitCell && findCellById(f, hitCell);
+      if (!hit) return;
+      deps.haptic?.("medium");
+      pick.onPick({ cellId: hit.c.id, location: roomName(roomById(f.locationId)), module: hit.s.name, shelf: hit.c.label });
+      return;
+    }
     const act = b.dataset.act;
     if (act === "edit") { edit = !edit; sizing = null; deps.haptic?.(); render(); return; }
     if (act === "cancel") { sizing = null; render(); return; }
@@ -658,14 +799,20 @@
       render(); return;
     }
     if (act === "remove") { const before = { x: f.x, y: f.y }; f.x = null; f.y = null; sizing = null; save(f, before); render(); return; }
+    if (act === "listonly") {
+      const before = { x: f.x, y: f.y, listOnly: false };
+      f.x = null; f.y = null; f.listOnly = true; sizing = null;
+      toast("Оставил списком — на плане не рисуется, но внутрь заглянуть можно");
+      save(f, before); render(); return;
+    }
     if (act === "apply") {
       const w = clampNum(root.querySelector("#wpW").value, 10, 600), dd = clampNum(root.querySelector("#wpD").value, 10, 400);
       if (w === null || dd === null) { toast("Ширина 10–600 см, глубина 10–400 см"); return; }
-      const before = { x: f.x, y: f.y, width: f.width, depth: f.depth, rotation: f.rotation };
-      f.width = w; f.depth = dd;
+      const before = { x: f.x, y: f.y, width: f.width, depth: f.depth, rotation: f.rotation, listOnly: f.listOnly };
+      f.width = w; f.depth = dd; f.listOnly = false;
       if (!placed(f)) {
         const room = roomById(view.room);
-        const others = data.furniture.filter((o) => o !== f && placed(o) && o.locationId === f.locationId && (o.kind === "wall") === (f.kind === "wall")).map(rectOf);
+        const others = data.furniture.filter((o) => o !== f && placed(o) && o.locationId === f.locationId && isWall(o) === isWall(f)).map(rectOf);
         const spot = findSpot(room.parts, { w: w / 100, d: dd / 100 }, others);
         if (spot) { f.rotation = spot.rotation; f.x = spot.x; f.y = spot.y; }
         else {
@@ -674,6 +821,7 @@
           f.x = r.x; f.y = r.y;
         }
         before.rotation = before.rotation ?? 0;
+        if (isWall(f)) layer = "wall";
         toast("Поставил к свободной стене — перетащите туда, где он стоит на самом деле");
       } else refit(f, before);
       sizing = null;
@@ -697,6 +845,7 @@
       await deps.api("wms.furniture.update", {
         id: f.id, x: f.x ?? null, y: f.y ?? null,
         width: Math.round(f.width ?? f.suggest.width), depth: Math.round(f.depth ?? f.suggest.depth), rotation: f.rotation,
+        listOnly: !!f.listOnly && !placed(f),
       });
       if (f.width == null) { f.width = Math.round(f.suggest.width); f.depth = Math.round(f.suggest.depth); }
     } catch (error) {
@@ -740,6 +889,7 @@
     tour.final = end;
     tour.push(setTimeout(() => {
       if (!placed(hit.f)) { tour.push(setTimeout(end, 50)); return; }
+      layer = isWall(hit.f) ? "wall" : "floor";
       view = { k: "room", room: room.id, pulse: hit.f.id }; render(); toast(`${roomName(room)} › ${shortName(hit.f.name)}`, 0);
       tour.push(setTimeout(() => { tour.final = null; end(); }, 1300));
     }, 1000));
@@ -754,5 +904,5 @@
     return true;
   }
 
-  window.WmsPlan = { mount, back, _test: { kindOf, suggestSize, footprint, snap, findSpot, searchItems, shortName, DRAW } };
+  window.WmsPlan = { mount, back, _test: { kindOf, suggestSize, frontLayout, footprint, snap, findSpot, searchItems, shortName, DRAW } };
 })();

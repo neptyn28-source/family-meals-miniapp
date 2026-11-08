@@ -100,3 +100,24 @@ test("результат ограничен и отсортирован по б�
   assert.equal(tips.length, 3);
   assert.ok(tips[0].score >= tips[1].score && tips[1].score >= tips[2].score);
 });
+
+test("placement: a shelf that is already full is not suggested, a half-full one is marked", async () => {
+  const { cellFill } = await import("../supabase/functions/home-wms-api/placement.ts");
+  const box = { category: "Обувь", name: "Коробка", quantity: 1, width_cm: 30, height_cm: 12, depth_cm: 20 };
+  const base = { location: "Прихожая", module: "Шкаф", shelf: "Полка 1", heightFromFloor: 30, width: 60, depth: 40, height: 30, zone: "hot" as const, storageType: "shelf" as const, allowedCategories: null };
+  const full = { ...base, id: "full", items: Array.from({ length: 8 }, () => box) }; // 8 × 7200 = 57600 из 61200
+  const half = { ...base, id: "half", shelf: "Полка 2", items: Array.from({ length: 6 }, () => box) }; // ~70%
+  assert.ok(cellFill(full)!.ratio > 0.9);
+  const shoe = { name: "Ботинки", category: "Обувь", usage: "daily" as const, weight: "light" as const, canHang: false, canFold: false, hazardous: false, size: { width: 32, height: 13, depth: 21 } };
+  const res = suggestPlacements(shoe, [full, half]);
+  assert.deepEqual(res.map((r) => r.cellId), ["half"]);
+  assert.ok(res[0].reasons.some((r) => /занята на \d+%/.test(r)));
+  // штанга: вешалки по 5 см
+  assert.equal(cellFill({ storageType: "rod", width: 50, height: 100, depth: 50, items: Array.from({ length: 10 }, () => ({ category: null })) })!.free, 0);
+});
+
+test("placement: ironing board does not go onto a 1-metre-high space that is narrower than it", () => {
+  const cell = { id: "c", location: "Прихожая", module: "Шкаф-купе — секция 1", shelf: "Полка 1", heightFromFloor: 7, width: 74, depth: 41, height: 98, zone: "warm" as const, storageType: "shelf" as const, allowedCategories: null, items: [] };
+  const board = { name: "Гладильная доска", category: "Хозяйство", usage: "weekly" as const, weight: "medium" as const, canHang: false, canFold: false, hazardous: false, size: { width: 140, height: 38, depth: 6 } };
+  assert.equal(suggestPlacements(board, [cell]).length, 0);
+});

@@ -39,6 +39,7 @@ export type FurnitureUpdate = {
   width_cm: number | null;
   depth_cm: number | null;
   rotation: number;
+  list_only: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -56,6 +57,8 @@ export function parseFurnitureUpdate(p: Record<string, unknown>): FurnitureUpdat
   if ((x === null) !== (y === null)) throw new Error("bad_furniture");
   const rotation = p.rotation ?? 0;
   if (!Number.isInteger(rotation) || (rotation as number) < 0 || (rotation as number) > 3) throw new Error("bad_furniture");
+  const listOnly = p.listOnly ?? false;
+  if (typeof listOnly !== "boolean" || (listOnly && x !== null)) throw new Error("bad_furniture");
   return {
     id: p.id,
     x_m: x,
@@ -63,5 +66,6 @@ export function parseFurnitureUpdate(p: Record<string, unknown>): FurnitureUpdat
     width_cm: num(p.width, 10, 600),
     depth_cm: num(p.depth, 10, 400),
     rotation: rotation as number,
+    list_only: listOnly,
   };
 }

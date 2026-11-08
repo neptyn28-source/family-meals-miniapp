@@ -70,6 +70,29 @@ function haptic(kind = "select") {
   } catch {}
 }
 
+// Диалоги Telegram вместо браузерных alert/confirm: в WebView они выглядят чужими, а местами не работают.
+function tgDialogs() {
+  try { return Boolean(tg?.isVersionAtLeast?.("6.2") && tg.showConfirm && tg.showAlert); } catch { return false; }
+}
+
+function askConfirm(text) {
+  if (!tgDialogs()) return Promise.resolve(window.confirm(text));
+  return new Promise((resolve) => {
+    try { tg.showConfirm(text, (ok) => resolve(Boolean(ok))); } catch { resolve(window.confirm(text)); }
+  });
+}
+
+function notify(text) {
+  const msg = String(text || "Что-то пошло не так").slice(0, 400);
+  if (!tgDialogs()) { window.alert(msg); return; }
+  try { tg.showAlert(msg); } catch { window.alert(msg); }
+}
+
+const BUDGET_STATUS = { within: "в бюджете", over: "выше бюджета", unverified: "бюджет не подтверждён" };
+const budgetStatusText = (v) => BUDGET_STATUS[v] || "бюджет не подтверждён";
+
+const hasTab = (tab) => typeof tab === "string" && Object.prototype.hasOwnProperty.call(TABS, tab);
+
 function memberName() {
   return bootstrapData?.member?.name || bootstrapData?.telegram_user?.first_name || "";
 }
@@ -102,7 +125,7 @@ function updateBackButton() {
 }
 
 function goTab(tab, { silent = false } = {}) {
-  if (!TABS[tab]) tab = "today";
+  if (!hasTab(tab)) tab = "today";
   if (!silent) haptic();
   nav = { ...nav, tab, root: true };
   markTab(tab);
@@ -444,7 +467,7 @@ function showJoinFamily() {
 // Вкладку можно открыть ссылкой: ?tab=menu (например, из бюджета).
 function startTab() {
   const tab = new URLSearchParams(location.search).get("tab");
-  return TABS[tab] ? tab : "today";
+  return hasTab(tab) ? tab : "today";
 }
 
 async function createInvite() {
@@ -578,10 +601,16 @@ async function loadInventory() {
 
     list.querySelectorAll("[data-inv-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
-        if (!confirm("Удалить эту позицию?")) return;
-        await api("inventory.delete", { id: button.dataset.invDelete });
-        if (editingInventoryId === button.dataset.invDelete) resetInventoryForm();
-        await loadInventory();
+        if (!(await askConfirm("Удалить эту позицию?"))) return;
+        button.disabled = true;
+        try {
+          await api("inventory.delete", { id: button.dataset.invDelete });
+          if (editingInventoryId === button.dataset.invDelete) resetInventoryForm();
+          await loadInventory();
+        } catch (error) {
+          button.disabled = false;
+          notify("Не удалилось: " + error.message);
+        }
       });
     });
   } catch (error) {
@@ -593,7 +622,7 @@ async function saveInventoryItem() {
   const name = document.querySelector("#invName").value.trim();
   const quantity = Number(document.querySelector("#invQty").value);
   if (!name || !Number.isFinite(quantity) || quantity < 0) {
-    alert("Укажи продукт и корректное количество.");
+    notify("Укажи продукт и корректное количество.");
     return;
   }
   const button = document.querySelector("#invAdd");
@@ -617,7 +646,7 @@ async function saveInventoryItem() {
     resetInventoryForm();
     await loadInventory();
   } catch (error) {
-    alert(error.message);
+    notify(error.message);
   } finally {
     button.disabled = false;
   }
@@ -666,14 +695,28 @@ async function loadRules() {
 
     list.querySelectorAll("[data-rule-toggle]").forEach((box) => {
       box.addEventListener("change", async () => {
-        await api("rules.update", { id: box.dataset.ruleToggle, enabled: box.checked });
+        box.disabled = true;
+        try {
+          await api("rules.update", { id: box.dataset.ruleToggle, enabled: box.checked });
+        } catch (error) {
+          box.checked = !box.checked;
+          notify("Не сохранилось: " + error.message);
+        } finally {
+          box.disabled = false;
+        }
       });
     });
     list.querySelectorAll("[data-rule-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
-        if (!confirm("Убрать это правило?")) return;
-        await api("rules.delete", { id: button.dataset.ruleDelete });
-        await loadRules();
+        if (!(await askConfirm("Убрать это правило?"))) return;
+        button.disabled = true;
+        try {
+          await api("rules.delete", { id: button.dataset.ruleDelete });
+          await loadRules();
+        } catch (error) {
+          button.disabled = false;
+          notify("Не удалилось: " + error.message);
+        }
       });
     });
   } catch (error) {
@@ -694,7 +737,7 @@ async function addRule() {
     document.querySelector("#ruleText").value = "";
     await loadRules();
   } catch (error) {
-    alert(error.message);
+    notify(error.message);
   } finally {
     button.disabled = false;
   }
@@ -948,9 +991,7 @@ async function importAiMenu() {
         <b>Меню импортировано.</b><br>
         Приёмов пищи: ${escapeHtml(data.imported_meals)} · готовок: ${escapeHtml(data.cook_blocks)}<br>
         Покупки: ${escapeHtml(money(data.shopping.estimated_cost_rub))} · ${escapeHtml(
-          data.shopping.budget_status === "within" ? "в бюджете" :
-          data.shopping.budget_status === "over" ? "выше бюджета" : "бюджет не подтверждён"
-        )}
+budgetStatusText(data.shopping.budget_status))}
         ${data.shopping.unpriced_count ? ` · без цены: ${escapeHtml(data.shopping.unpriced_count)}` : ""}
         <div style="display:flex;gap:8px;margin-top:10px">
           <button id="openImportedWeek">Открыть меню</button>
@@ -1076,7 +1117,7 @@ async function showShopping() {
     const weekData = await api("week.get", { week_start: isoDate(activeWeekStart) });
     const data = await api("shopping.list", { week_id: weekData.week.id });
     const items = data.items || [];
-    status.textContent = `${weekRange(activeWeekStart)} · ${weekData.week.estimated_cost != null ? money(weekData.week.estimated_cost) : "стоимость не рассчитана"} · ${weekData.week.budget_status || "—"}`;
+    status.textContent = `${weekRange(activeWeekStart)} · ${weekData.week.estimated_cost != null ? money(weekData.week.estimated_cost) : "стоимость не рассчитана"} · ${weekData.week.budget_status ? budgetStatusText(weekData.week.budget_status) : "—"}`;
 
     if (!items.length) {
       content.innerHTML = '<p>Список покупок появится после импорта меню из ChatGPT.</p>';
@@ -1186,7 +1227,7 @@ async function showShopping() {
         } catch (error) {
           box.checked = !box.checked;
           updateProgress();
-          alert(error.message);
+          notify(error.message);
         } finally {
           box.disabled = false;
         }
@@ -1439,14 +1480,17 @@ async function showMealReplacement() {
   await loadMealReplacement();
 }
 async function showMealReplacementForWeek() { await loadMealReplacement(); }
+let replaceSeq = 0;
 async function loadMealReplacement() {
   const status = document.querySelector("#replaceStatus");
   const content = document.querySelector("#replaceContent");
   if (!status || !content) return;
+  // Быстро листают недели — ответ про старую неделю не должен перезаписать новую.
+  const seq = ++replaceSeq;
   status.textContent = "Загружаем…";
   try {
     const data = await api("week.get", { week_start: isoDate(activeWeekStart) });
-    if (!status.isConnected) return;
+    if (!status.isConnected || seq !== replaceSeq) return;
     const meals = data.meals || [];
     status.textContent = weekRange(activeWeekStart) + " · " + meals.length + " блюд";
     if (!meals.length) { content.innerHTML = "<p>Сначала загрузи меню на эту неделю.</p>"; return; }
@@ -1458,7 +1502,7 @@ async function loadMealReplacement() {
       const result = document.querySelector("#replaceResult");
       if (!meal || !title) { result.textContent = "Выбери блюдо и введи название."; return; }
       if (new Date(String(meal.meal_date).slice(0,10) + "T12:00:00").getDay() === 0) { result.textContent = "Воскресенье — кафе, домашние блюда здесь не меняем."; return; }
-      if (!window.confirm("Рецепт и ингредиенты будут очищены, а бюджет и проверки недели сброшены. Продолжить?")) return;
+      if (!(await askConfirm("Рецепт и ингредиенты будут очищены, а бюджет и проверки недели сброшены. Продолжить?"))) return;
       button.disabled = true;
       result.textContent = "Сохраняем…";
       try {
@@ -1467,7 +1511,7 @@ async function loadMealReplacement() {
       } catch (error) { result.textContent = "Ошибка: " + error.message; }
       finally { button.disabled = false; }
     });
-  } catch (error) { if (status.isConnected) status.textContent = "Ошибка: " + error.message; }
+  } catch (error) { if (status.isConnected && seq === replaceSeq) status.textContent = "Ошибка: " + error.message; }
 }
 
 const WMS_ZONES = {
@@ -1748,7 +1792,8 @@ function showIntakeDraft(step, draft, categories) {
     '<b>Размер, см (примерно)</b><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' +
     ["width", "height", "depth"].map((k, i) => '<input id="draftSize_' + k + '" type="number" min="1" max="400" inputmode="numeric" placeholder="' +
       ["ширина", "высота", "глубина"][i] + '" value="' + escapeHtml(s[k] ?? "") + '" style="' + inputStyle() + '">').join("") + "</div>" +
-    '<button id="draftSuggest" class="cook-open">Подобрать место</button></div><div id="draftResult"></div></div>';
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button id="draftSuggest" class="cook-open">Подобрать место</button>' +
+    '<button id="draftPick" class="btn-ghost">🗺 Выберу сам</button></div></div><div id="draftResult"></div></div>';
 
   step.querySelectorAll("[data-choice]").forEach((btn) => btn.addEventListener("click", () => {
     item[btn.dataset.choice] = btn.dataset.value;
@@ -1798,7 +1843,7 @@ function showIntakeDraft(step, draft, categories) {
 
   const result = step.querySelector("#draftResult");
   const suggestBtn = step.querySelector("#draftSuggest");
-  suggestBtn.addEventListener("click", async () => {
+  const readProfile = () => {
     const dims = ["width", "height", "depth"].map((k) => Number(step.querySelector("#draftSize_" + k).value));
     const profile = {
       name: step.querySelector("#draftName").value.trim() || item.name,
@@ -1810,6 +1855,12 @@ function showIntakeDraft(step, draft, categories) {
       hazardous: step.querySelector("#draftHazard").checked,
       size: dims.every((n) => n > 0 && n <= 400) ? { width: dims[0], height: dims[1], depth: dims[2] } : null,
     };
+    return profile;
+  };
+  // Сам выбираю полку на плане — без бота и ИИ.
+  step.querySelector("#draftPick").addEventListener("click", () => pickShelfManually(result, readProfile()));
+  suggestBtn.addEventListener("click", async () => {
+    const profile = readProfile();
     suggestBtn.disabled = true;
     result.textContent = "Ищу лучшее место…";
     try {
@@ -1832,24 +1883,61 @@ function showIntakeSuggestions(result, profile, suggestions) {
       escapeHtml(s.heightFromFloor) + " см от пола" + (zone ? " · " + zone.icon + " " + escapeHtml(zone.text) : "") + "</div>" +
       (s.reasons.length ? '<ul class="muted" style="margin:4px 0 6px 18px;padding:0">' + s.reasons.map((r) => "<li>" + escapeHtml(r) + "</li>").join("") + "</ul>" : "") +
       '<button data-place="' + i + '" style="' + buttonStyle() + '">Положу сюда</button></div></article>';
-  }).join("") + '<p id="placeStatus" role="status"></p>';
+  }).join("") + '<p id="placeStatus" role="status"></p><button id="placePick" class="btn-ghost">🗺 Нет, выберу полку сам</button>';
+  result.querySelector("#placePick").addEventListener("click", () => pickShelfManually(result, profile));
   result.querySelectorAll("[data-place]").forEach((btn) => btn.addEventListener("click", async () => {
     const s = suggestions[Number(btn.dataset.place)];
     const status = result.querySelector("#placeStatus");
     result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = true; });
     status.textContent = "Сохраняю…";
     try {
-      const added = await wmsApi("wms.items.add", { item: profile, cell_id: s.cellId });
-      result.innerHTML = '<div class="success-box">Готово: «' + escapeHtml(profile.name) + "» лежит в " + escapeHtml(s.location) + " → " +
-        escapeHtml(s.module) + " → " + escapeHtml(s.shelf) + '.</div><div style="display:flex;gap:8px;margin-top:10px">' +
-        '<button id="intakeWhere">🗺 Показать на плане</button><button id="intakeMore" class="btn-ghost">Положить ещё</button></div>';
-      result.querySelector("#intakeMore").addEventListener("click", () => showIntake());
-      result.querySelector("#intakeWhere").addEventListener("click", () => { nav.sub = "plan"; showPlan({ focusItemId: added.id }); });
+      await saveIntakeItem(result, profile, s);
     } catch (error) {
       status.textContent = "Не сохранилось: " + error.message;
       result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = false; });
     }
   }));
+}
+
+async function saveIntakeItem(result, profile, place) {
+  const added = await wmsApi("wms.items.add", { item: profile, cell_id: place.cellId });
+  result.innerHTML = '<div class="success-box">Готово: «' + escapeHtml(profile.name) + "» лежит в " + escapeHtml(place.location) + " → " +
+    escapeHtml(place.module) + " → " + escapeHtml(place.shelf) + '.</div><div style="display:flex;gap:8px;margin-top:10px">' +
+    '<button id="intakeWhere">🗺 Показать на плане</button><button id="intakeMore" class="btn-ghost">Положить ещё</button></div>';
+  result.querySelector("#intakeMore").addEventListener("click", () => showIntake());
+  result.querySelector("#intakeWhere").addEventListener("click", () => { nav.sub = "plan"; showPlan({ focusItemId: added.id }); });
+}
+
+/** Ручной выбор: план квартиры прямо в шаге приёмки, нажатие на полку — «Положить сюда». */
+async function pickShelfManually(result, profile) {
+  result.innerHTML = '<h3>Куда положить «' + escapeHtml(profile.name) + '»</h3><div id="pickRoot">' + skeleton(2) + '</div><p id="pickStatus" role="status" class="muted"></p>';
+  const box = result.querySelector("#pickRoot");
+  try {
+    await loadWmsPlan();
+  } catch (error) {
+    if (box.isConnected) box.innerHTML = "<p>Не удалось открыть план: " + escapeHtml(error.message) + "</p>";
+    return;
+  }
+  if (!box.isConnected) return;
+  let saving = false;
+  window.WmsPlan.mount(box, { api: wmsApi, esc: escapeHtml, haptic, onDepth() {} }, {
+    pick: {
+      name: profile.name,
+      async onPick(place) {
+        if (saving) return;
+        saving = true;
+        const status = result.querySelector("#pickStatus");
+        if (status) status.textContent = "Сохраняю…";
+        try {
+          await saveIntakeItem(result, profile, place);
+        } catch (error) {
+          saving = false;
+          if (status) status.textContent = "Не сохранилось: " + error.message;
+        }
+      },
+    },
+  });
+  result.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 tabbar.querySelectorAll(".tab").forEach((button) => {

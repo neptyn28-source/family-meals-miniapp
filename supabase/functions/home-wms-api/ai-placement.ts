@@ -104,7 +104,7 @@ export async function choosePlacements(
     PLACEMENT_SCHEMA,
     apiKey,
     model,
-    { temperature: 0.2, timeoutMs: 25000, label: "AI placement" },
+    { temperature: 0.2, timeoutMs: 8000, budgetMs: 12000, label: "AI placement" },
     fetcher,
   );
   const picked = pickFromAnswer(raw, candidates);
