@@ -312,3 +312,128 @@ details[open]>*:not(summary){animation:fadeUp .3s var(--ease) both}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}
 }
+
+/* ---------- Вещи: план квартиры (wms-plan.js) ---------- */
+.segmented.three{grid-template-columns:repeat(3,1fr)}
+.segmented.three .seg-pill{width:calc(33.333% - 2.67px)}
+.segmented.three.s1 .seg-pill{transform:translateX(100%)}
+.segmented.three.s2 .seg-pill{transform:translateX(200%)}
+.wp{display:flex;flex-direction:column;gap:10px;
+  --wp-wall:#cfe0d8;--wp-room:#13241e;--wp-room-hi:#1c4a39;--wp-floor-ln:rgba(255,255,255,.035);
+  --wp-wood:#6b5640;--wp-wood-top:#86704f;--wp-wood-edge:#c2a57c;--wp-inner:#3d3226;
+  --wp-fab:#4a6170;--wp-fab-dark:#34444f;--wp-soft:#dfe6ea;--wp-blanket:#2f7a63;
+  --wp-ceramic:#e8eef0;--wp-basin:#bfd3da;--wp-metal:#9fb0b8;--wp-water:#2c7fa3;--wp-glass:#6ea7b8;
+  --wp-screen:#0d1316;--wp-label-bg:rgba(11,20,17,.82)}
+.wp-search input{width:100%}
+.wp-results{display:flex;flex-direction:column;gap:6px}
+.wp-results:empty{display:none}
+.wp-res{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--card-strong);border:1px solid var(--stroke);padding:10px 14px;color:var(--text)}
+.wp-res span{color:var(--hint);font-size:12.5px;font-weight:500}
+.wp-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;font-size:14px}
+.wp-crumbs button{background:none;border:0;padding:6px 8px;color:var(--hint);font-weight:600;border-radius:10px;min-height:0;box-shadow:none}
+.wp-crumbs button.on{color:var(--text)}
+.wp-crumbs span{color:var(--hint)}
+.wp-stage{position:relative;border-radius:var(--radius);background:linear-gradient(180deg,#0f1d18,#0b1612);border:1px solid var(--stroke);padding:6px;overflow:hidden}
+.wp-svg{display:block;width:100%;height:auto;max-height:62vh;user-select:none;-webkit-user-select:none;touch-action:pan-y}
+.wp-svg.editing{touch-action:none}
+.wp-toast{padding:9px 12px;border-radius:12px;background:var(--wp-label-bg);border:1px solid var(--stroke-strong);color:var(--text);font-size:13.5px;font-weight:600;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:screenIn .3s var(--ease)}
+.wp-empty{padding:28px 12px;text-align:center}
+.wp-empty p{margin:6px 0 12px}
+.wp-tray{display:flex;flex-direction:column;gap:10px}
+.wp-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.wp-row button{padding:10px 14px}
+.wp-edit{background:var(--card-strong);border:1px dashed var(--stroke-strong);color:var(--text)}
+.wp-edit.on{background:var(--accent);color:var(--accent-ink);border-style:solid}
+.wp-sub{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--hint)}
+.wp-chips{display:flex;flex-wrap:wrap;gap:6px}
+.wp-chip{padding:8px 12px;border-radius:999px;font-size:13.5px;font-weight:600;background:var(--card-strong);border:1px solid var(--stroke);color:var(--text);min-height:0}
+.wp-chip.off{background:none;border-style:dashed;color:var(--hint)}
+.wp-sheet{background:var(--card-strong);border:1px solid var(--stroke);border-radius:var(--radius-sm);padding:14px;display:flex;flex-direction:column;gap:10px;animation:screenIn .3s var(--ease)}
+.wp-sheet-h{display:flex;flex-direction:column;gap:3px}
+.wp-sheet-h b{font-size:16px}
+.wp-sz{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wp-sz label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--hint);font-weight:600}
+.wp-sz input{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;min-width:0;width:100%}
+.wp-face{margin-left:4px}
+.wp-items{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+/* план и комнаты (единицы - метры) */
+.wp-room rect{fill:var(--wp-room);stroke:var(--wp-wall);stroke-width:.06;transition:fill .35s var(--ease),opacity .35s}
+.wp-room.hi rect{fill:var(--wp-room-hi)}
+.wp-room.dim rect{opacity:.35}
+.wp-svg:not(.front) .wp-room{cursor:pointer}
+.wp-open{stroke:var(--wp-room);stroke-width:.08}
+.wp-door-gap{stroke:var(--accent);stroke-width:.09;stroke-linecap:round}
+.wp-rname{fill:var(--text);font:700 .4px Inter,system-ui,sans-serif;text-anchor:middle;dominant-baseline:middle;pointer-events:none;paint-order:stroke;stroke:var(--wp-room);stroke-width:.06}
+.wp-rname.sm{font-size:.27px}
+.wp-fur{cursor:pointer}
+.wp-svg.editing .wp-fur{cursor:grab}
+.wp-hit{fill:transparent}
+.wp-sel{fill:none;stroke:var(--accent);stroke-width:.04;stroke-dasharray:.08 .05}
+.wp-fur.pulse{animation:wpPulse 1s ease-in-out infinite}
+@keyframes wpPulse{50%{filter:brightness(1.6)}}
+.wp-label{fill:var(--text);font-family:Inter,system-ui,sans-serif;font-weight:700;text-anchor:middle;dominant-baseline:middle;pointer-events:none;paint-order:stroke;stroke:var(--wp-label-bg);stroke-width:.035;stroke-linejoin:round}
+.wp-wood{fill:var(--wp-wood);stroke:var(--wp-wood-edge);stroke-width:.012}
+.wp-top{fill:var(--wp-wood-top)}
+.wp-inner{fill:var(--wp-inner)}
+.wp-door{fill:#8fa7ae;stroke:#c9d8dc;stroke-width:.006;opacity:.92}
+.wp-door2{fill:#6d858c;stroke:#c9d8dc;stroke-width:.006;opacity:.92}
+.wp-rod{stroke:var(--wp-metal);stroke-width:.015;stroke-linecap:round}
+.wp-ln{stroke:rgba(0,0,0,.35);stroke-width:.008}
+.wp-grain{stroke:rgba(255,255,255,.12);stroke-width:.006}
+.wp-handle{stroke:var(--wp-metal);stroke-width:.012;stroke-linecap:round}
+.wp-fab{fill:var(--wp-fab)}
+.wp-fab-dark{fill:var(--wp-fab-dark)}
+.wp-soft{fill:var(--wp-soft);opacity:.92}
+.wp-blanket{fill:var(--wp-blanket);opacity:.92}
+.wp-fold{stroke:rgba(255,255,255,.35);stroke-width:.012}
+.wp-seam{stroke:rgba(0,0,0,.3);stroke-width:.01}
+.wp-lamp{fill:#f3d58a;opacity:.85}
+.wp-lamp-in{fill:#fff4cc}
+.wp-screen{fill:var(--wp-screen)}
+.wp-kbd{fill:#2a3238}
+.wp-chair{fill:#3a4a52;stroke:#55666e;stroke-width:.01}
+.wp-plate{fill:#e8eef0;opacity:.85}
+.wp-mirror{fill:#b9d7e2;opacity:.8}
+.wp-dot{fill:#e3c1d2}
+.wp-metal-bg{fill:#2b3337}
+.wp-metal{fill:var(--wp-metal)}
+.wp-box{fill:#8a6d47}
+.wp-box2{fill:#5f7d6a}
+.wp-ceramic{fill:var(--wp-ceramic)}
+.wp-basin{fill:var(--wp-basin)}
+.wp-water{fill:var(--wp-water)}
+.wp-water-ln{stroke:rgba(255,255,255,.4);stroke-width:.01}
+.wp-fish{fill:#ff9f5a}
+.wp-glass{fill:var(--wp-glass);opacity:.85}
+.wp-glass-top{fill:#151b1e}
+.wp-burner{fill:none;stroke:#7d8a90;stroke-width:.012}
+.wp-wall{fill:rgba(143,167,174,.18);stroke:#8fa7ae;stroke-width:.015;stroke-dasharray:.06 .04}
+.wp-wall-ln{stroke:rgba(143,167,174,.45);stroke-width:.008}
+/* шкаф спереди (единицы - сантиметры) */
+.wf-ruler line{stroke:rgba(255,255,255,.06);stroke-width:.3}
+.wf-ruler text{fill:var(--hint);font:600 4.2px Inter,system-ui,sans-serif;text-anchor:end}
+.wf-carcass{fill:var(--wp-wood);stroke:var(--wp-wood-edge);stroke-width:.8}
+.wf-back{fill:#241d16}
+.wf-space{fill:rgba(255,255,255,.025)}
+.wf-board{fill:var(--wp-wood-top)}
+.wf-rod{stroke:var(--wp-metal);stroke-width:1.3;stroke-linecap:round}
+.wf-hanger{fill:none;stroke:rgba(207,224,216,.45);stroke-width:.45}
+.wf-drawer{fill:#5a4836;stroke:var(--wp-wood-edge);stroke-width:.5}
+.wf-handle{stroke:var(--wp-metal);stroke-width:1;stroke-linecap:round}
+.wf-lbl{fill:rgba(233,243,239,.55);font:600 3.6px Inter,system-ui,sans-serif}
+.wf-chip{fill:rgba(63,209,155,.16);stroke:rgba(63,209,155,.45);stroke-width:.3}
+.wf-chipt{fill:var(--text);font:600 3.5px Inter,system-ui,sans-serif}
+.wf-more{fill:var(--hint);font:700 4px Inter,system-ui,sans-serif;text-anchor:end}
+.wf-dot{fill:var(--accent)}
+.wf-tap{fill:transparent;cursor:pointer}
+.wf-cell.hit .wf-space,.wf-cell.hit .wf-drawer{fill:rgba(63,209,155,.22);stroke:var(--accent);stroke-width:.8;animation:wfGlow 1.4s ease-in-out infinite}
+.wf-cell.hit .wf-chip{fill:var(--accent)}
+.wf-cell.hit .wf-chipt{fill:var(--accent-ink)}
+@keyframes wfGlow{50%{fill:rgba(63,209,155,.38)}}
+.wf-sec{fill:var(--hint);font:600 3.8px Inter,system-ui,sans-serif;text-anchor:middle}
+.wf-kid{stroke:var(--danger);stroke-width:.5;stroke-dasharray:2.5 1.6}
+.wf-kidt{fill:var(--danger);font:700 3.8px Inter,system-ui,sans-serif}
+.wf-floor{stroke:var(--wp-wall);stroke-width:1}
+@media (prefers-reduced-motion:reduce){.wp-fur.pulse,.wf-cell.hit .wf-space,.wf-cell.hit .wf-drawer{animation:none}}
+.wp-row button:not(.primary):not(.wp-edit),.wp-empty button{background:var(--card-strong);color:var(--text);border:1px solid var(--stroke)}
+[data-plan-item]{width:38px;height:38px;padding:0!important;border-radius:12px;font-size:17px;flex:none}

@@ -7,6 +7,7 @@ import { shapeWmsItems, type WmsItemRow } from "./items.ts";
 import { suggestPlacements, type CellInfo, type ItemProfile, type Size } from "./placement.ts";
 import { analyzeItem, BASE_CATEGORIES } from "./intake.ts";
 import { choosePlacements } from "./ai-placement.ts";
+import { groupModules, parseFurnitureUpdate } from "./plan.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -88,6 +89,37 @@ type ModuleRow = {
 type LocationRow = { id: string; name: string; position: number; wms_modules: ModuleRow[] };
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
+
+type PlanModuleRow = {
+  id: string;
+  name: string;
+  location_id: string;
+  position: number;
+  no_shelves: boolean;
+  furniture_id: string | null;
+  wms_cells: {
+    id: string;
+    label: string;
+    height_from_floor_cm: number | string;
+    width_cm: number | string | null;
+    depth_cm: number | string | null;
+    height_cm: number | string | null;
+    storage_type: string | null;
+    position: number;
+    wms_items: { id: string; name: string; quantity: number }[];
+  }[];
+};
+type FurnitureRow = {
+  id: string;
+  location_id: string;
+  name: string;
+  x_m: number | string | null;
+  y_m: number | string | null;
+  width_cm: number | string | null;
+  depth_cm: number | string | null;
+  rotation: number;
+  position: number;
+};
 
 const USAGES = ["daily", "weekly", "monthly", "rare"] as const;
 const WEIGHTS = ["light", "medium", "heavy"] as const;
@@ -232,6 +264,120 @@ async function main(req: Request) {
       return reply({ ok: false, error: "not_invited", message: "Этот Telegram-аккаунт не привязан к семье" }, 403);
     }
     const familyId = String(member.family_id);
+
+    // Визуальный план: квартира, мебель на ней и полки с вещами — одним ответом.
+    if (action === "wms.plan.load") {
+      const moduleSelect =
+        "id, name, location_id, position, no_shelves, furniture_id, wms_cells(id, label, height_from_floor_cm, width_cm, depth_cm, height_cm, storage_type, position, wms_items(id, name, quantity))";
+      const loadModules = async () => {
+        const { data, error } = await db.from("wms_modules").select(moduleSelect).eq("family_id", familyId);
+        if (error) throw error;
+        return (data ?? []) as unknown as PlanModuleRow[];
+      };
+      const loadFurniture = async () => {
+        const { data, error } = await db
+          .from("wms_furniture")
+          .select("id, location_id, name, x_m, y_m, width_cm, depth_cm, rotation, position")
+          .eq("family_id", familyId);
+        if (error) throw error;
+        return (data ?? []) as FurnitureRow[];
+      };
+      let [modules, furniture] = await Promise.all([loadModules(), loadFurniture()]);
+
+      // Секции без предмета (новые или созданные до плана) собираем в предметы.
+      const orphans = modules.filter((m) => !m.furniture_id);
+      if (orphans.length) {
+        for (const draft of groupModules(orphans)) {
+          let target = furniture.find((f) => f.location_id === draft.location_id && f.name === draft.name);
+          if (!target) {
+            const { data, error } = await db
+              .from("wms_furniture")
+              .insert({ family_id: familyId, location_id: draft.location_id, name: draft.name, position: draft.position })
+              .select("id, location_id, name, x_m, y_m, width_cm, depth_cm, rotation, position")
+              .single();
+            if (error) throw error;
+            target = data as FurnitureRow;
+            furniture.push(target);
+          }
+          const { error } = await db
+            .from("wms_modules")
+            .update({ furniture_id: target.id })
+            .eq("family_id", familyId)
+            .in("id", draft.module_ids)
+            .is("furniture_id", null);
+          if (error) throw error;
+        }
+        [modules, furniture] = await Promise.all([loadModules(), loadFurniture()]);
+      }
+
+      const [{ data: plan, error: planError }, { data: locations, error: locError }] = await Promise.all([
+        db.from("wms_floorplans").select("data").eq("family_id", familyId).maybeSingle(),
+        db.from("wms_locations").select("id, name, position").eq("family_id", familyId),
+      ]);
+      if (planError) throw planError;
+      if (locError) throw locError;
+
+      const n = (v: number | string | null) => (v === null || v === undefined ? null : Number(v));
+      const shaped = furniture
+        .map((f) => ({
+          id: f.id,
+          locationId: f.location_id,
+          name: f.name,
+          x: n(f.x_m),
+          y: n(f.y_m),
+          width: n(f.width_cm),
+          depth: n(f.depth_cm),
+          rotation: f.rotation,
+          position: f.position,
+          sections: modules
+            .filter((m) => m.furniture_id === f.id)
+            .sort(byPosition)
+            .map((m) => ({
+              id: m.id,
+              name: m.name,
+              noShelves: m.no_shelves,
+              cells: (m.wms_cells ?? []).sort(byPosition).map((c) => ({
+                id: c.id,
+                label: c.label,
+                from: Number(c.height_from_floor_cm),
+                width: n(c.width_cm),
+                depth: n(c.depth_cm),
+                height: n(c.height_cm),
+                type: c.storage_type || "shelf",
+                items: (c.wms_items ?? []).map((i) => ({ id: i.id, name: i.name, quantity: i.quantity })),
+              })),
+            })),
+        }))
+        .filter((f) => f.sections.length > 0)
+        .sort(byPosition);
+
+      return reply({
+        ok: true,
+        plan: plan?.data ?? null,
+        locations: ((locations ?? []) as { id: string; name: string; position: number }[]).sort(byPosition),
+        furniture: shaped,
+      });
+    }
+
+    if (action === "wms.furniture.update") {
+      let patch;
+      try {
+        patch = parseFurnitureUpdate(payload as Record<string, unknown>);
+      } catch {
+        throw new BadRequest("bad_furniture");
+      }
+      const { id, ...fields } = patch;
+      const { data, error } = await db
+        .from("wms_furniture")
+        .update({ ...fields, updated_at: new Date().toISOString() })
+        .eq("family_id", familyId)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return reply({ ok: false, error: "not_found", message: "Предмет не найден" }, 404);
+      return reply({ ok: true });
+    }
 
     if (action === "wms.load") {
       const { data, error } = await db
@@ -441,7 +587,7 @@ async function main(req: Request) {
         ["wms_cells", cells],
       ] as const) {
         if (batch.length === 0) continue;
-        const { error } = await db.from(table).upsert(batch, { onConflict: "id", ignoreDuplicates: true });
+        const { error } = await db.from(table).upsert(batch as Record<string, unknown>[], { onConflict: "id", ignoreDuplicates: true });
         if (error) throw error;
       }
       // Чужая мебель не найдётся по family_id — обновление просто ничего не тронет.

@@ -51,7 +51,7 @@ let initData = "";
 let bootstrapData = null;
 let activeWeekStart = getMonday(new Date());
 let editingInventoryId = null;
-let nav = { tab: "today", root: true, sub: "find" };
+let nav = { tab: "today", root: true, sub: "plan" };
 let budgetFrame = null;
 
 if (tg) {
@@ -122,7 +122,13 @@ function goTab(tab, { silent = false } = {}) {
   budgetFrame?.classList.add("hidden");
   if (tab === "today") return showToday();
   if (tab === "menu" || tab === "home") return renderHub(tab);
-  if (tab === "things") return nav.sub === "put" ? showIntake() : showWhereThings();
+  if (tab === "things") return thingsScreen();
+}
+
+function thingsScreen(opts) {
+  if (nav.sub === "put") return showIntake();
+  if (nav.sub === "find") return showWhereThings();
+  return showPlan(opts);
 }
 
 // Открыть вложенный экран вкладки (с кнопкой «назад»).
@@ -136,6 +142,7 @@ function openSub(tab, run) {
 
 function goBack() {
   if (nav.root) return;
+  if (nav.tab === "things" && nav.sub === "plan" && window.WmsPlan?.back()) return;
   placeholder.classList.add("back");
   goTab(nav.tab, { silent: true });
   setTimeout(() => placeholder.classList.remove("back"), 450);
@@ -143,10 +150,11 @@ function goBack() {
 
 function panelChrome() {
   if (nav.tab === "things") {
-    const put = nav.sub === "put";
-    return `<div class="segmented ${put ? "put" : ""}" role="tablist"><span class="seg-pill" aria-hidden="true"></span>
-      <button data-seg="find" class="${put ? "" : "on"}" role="tab" aria-selected="${!put}">🔎 Найти</button>
-      <button data-seg="put" class="${put ? "on" : ""}" role="tab" aria-selected="${put}">📥 Положить</button></div>`;
+    const segs = [["plan", "🗺 План"], ["find", "🔎 Найти"], ["put", "📥 Положить"]];
+    const at = Math.max(0, segs.findIndex(([id]) => id === nav.sub));
+    return `<div class="segmented three s${at}" role="tablist"><span class="seg-pill" aria-hidden="true"></span>` +
+      segs.map(([id, label], i) => `<button data-seg="${id}" class="${i === at ? "on" : ""}" role="tab" aria-selected="${i === at}">${label}</button>`).join("") +
+      "</div>";
   }
   if (!nav.root && TABS[nav.tab]) {
     return `<button class="backbar" data-back><span aria-hidden="true">‹</span>${escapeHtml(TABS[nav.tab].label)}</button>`;
@@ -160,7 +168,8 @@ function bindPanelChrome() {
     if (b.dataset.seg === nav.sub) return;
     haptic();
     nav.root = true;
-    if (b.dataset.seg === "put") showIntake(); else showWhereThings();
+    nav.sub = b.dataset.seg;
+    thingsScreen();
   }));
 }
 
@@ -1486,7 +1495,48 @@ function wmsItemCard(item) {
     : "Полка не указана";
   const meta = [item.category, WMS_USAGE[item.usage]].filter(Boolean).map(escapeHtml).join(" · ");
   return '<article class="row-card"><div><b>' + escapeHtml(item.name) + (item.quantity > 1 ? " × " + escapeHtml(item.quantity) : "") +
-    '</b><div class="muted">' + shelf + "</div>" + (meta ? '<div class="muted">' + meta + "</div>" : "") + "</div></article>";
+    '</b><div class="muted">' + shelf + "</div>" + (meta ? '<div class="muted">' + meta + "</div>" : "") + "</div>" +
+    (place ? '<button class="btn-ghost" data-plan-item="' + escapeHtml(item.id) + '" aria-label="Показать на плане">🗺</button>' : "") + "</article>";
+}
+
+// План квартиры живёт в wms-plan.js: грузим его один раз и мимо кэша Telegram, как и этот файл.
+let wmsPlanScript = null;
+function loadWmsPlan() {
+  if (window.WmsPlan) return Promise.resolve();
+  wmsPlanScript ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "wms-plan.js?v=" + Date.now();
+    s.onload = () => resolve();
+    s.onerror = () => { wmsPlanScript = null; reject(new Error("Не загрузился экран плана, проверьте интернет")); };
+    document.head.appendChild(s);
+  });
+  return wmsPlanScript;
+}
+
+async function showPlan(opts = {}) {
+  nav.sub = "plan";
+  if (nav.tab !== "things") { markTab("things"); budgetFrame?.classList.add("hidden"); }
+  nav.root = true;
+  showPanel('<div id="wmsPlanRoot">' + skeleton(2) + "</div>");
+  const box = document.querySelector("#wmsPlanRoot");
+  try {
+    await loadWmsPlan();
+  } catch (error) {
+    if (box.isConnected) box.innerHTML = '<p>' + escapeHtml(error.message) + '</p><button id="wmsPlanRetry">Повторить</button>';
+    box.querySelector("#wmsPlanRetry")?.addEventListener("click", () => showPlan(opts));
+    return;
+  }
+  if (!box.isConnected) return;
+  window.WmsPlan.mount(box, {
+    api: wmsApi,
+    esc: escapeHtml,
+    haptic,
+    onDepth(depth) {
+      if (nav.tab !== "things" || nav.sub !== "plan") return;
+      nav.root = depth === 0;
+      updateBackButton();
+    },
+  }, opts);
 }
 
 async function showWhereThings() {
@@ -1595,6 +1645,10 @@ async function showWhereThings() {
   }
 
   search.addEventListener("input", draw);
+  result.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-plan-item]");
+    if (b) { nav.sub = "plan"; showPlan({ focusItemId: b.dataset.planItem }); }
+  });
   drawChips();
   draw();
   search.focus();
@@ -1785,12 +1839,12 @@ function showIntakeSuggestions(result, profile, suggestions) {
     result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = true; });
     status.textContent = "Сохраняю…";
     try {
-      await wmsApi("wms.items.add", { item: profile, cell_id: s.cellId });
+      const added = await wmsApi("wms.items.add", { item: profile, cell_id: s.cellId });
       result.innerHTML = '<div class="success-box">Готово: «' + escapeHtml(profile.name) + "» лежит в " + escapeHtml(s.location) + " → " +
         escapeHtml(s.module) + " → " + escapeHtml(s.shelf) + '.</div><div style="display:flex;gap:8px;margin-top:10px">' +
-        '<button id="intakeMore" style="' + buttonStyle() + '">Положить ещё</button><button id="intakeWhere" style="' + buttonStyle() + '">Где что лежит</button></div>';
+        '<button id="intakeWhere">🗺 Показать на плане</button><button id="intakeMore" class="btn-ghost">Положить ещё</button></div>';
       result.querySelector("#intakeMore").addEventListener("click", () => showIntake());
-      result.querySelector("#intakeWhere").addEventListener("click", () => showWhereThings());
+      result.querySelector("#intakeWhere").addEventListener("click", () => { nav.sub = "plan"; showPlan({ focusItemId: added.id }); });
     } catch (error) {
       status.textContent = "Не сохранилось: " + error.message;
       result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = false; });
