@@ -3,62 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1411" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <title>ДОМА — семейная кухня</title>
+  <title>ДОМА — семейное приложение</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="app">
-    <section class="hero">
-      <div class="eyebrow">ДОМА · СЕМЕЙНАЯ КУХНЯ</div>
-      <h1>Вкусно жить дома <span aria-hidden="true">✦</span></h1>
-      <p id="status">Подключаем Telegram…</p>
-    </section>
-
-    <section id="authCard" class="card">
-      <h2>Вход</h2>
-      <p id="authText">Проверяем пользователя через Telegram.</p>
-      <button id="retryBtn" hidden>Повторить</button>
-    </section>
-
-    <section id="home" class="hidden">
-      <div class="card">
-        <h2 id="hello">Сегодня у нас дома</h2>
-        <p>
-          Планируем вкусную неделю, готовим на два дня и покупаем только нужное. Меню учитывает семейные вкусы и цели питания.
-        </p>
-      </div>
-
-      <div class="flow-card" aria-label="Как работает семейное меню">
-        <div class="flow-step"><b>1</b><span>Заполни остатки, правила, вес/цели и отзывы</span></div>
-        <div class="flow-step"><b>2</b><span>Нажми «Выгрузить в ИИ» и отправь промт в ChatGPT</span></div>
-        <div class="flow-step"><b>3</b><span>Вставь готовое меню обратно — бот посчитает покупки</span></div>
-      </div>
-
-      <div class="grid" aria-label="Разделы семейной кухни">
-        <a class="tile accent" href="./family-budget/?v=20261107" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:7px;padding:16px;border-radius:16px" aria-label="Открыть семейный бюджет"><span class="tile-icon" aria-hidden="true">💰</span><b>Семейный бюджет</b><span>Расходы, доходы, конверты и цели в рублях</span></a>
-        <a class="tile accent" href="./home-wms/?v=20261027" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:7px;padding:16px;border-radius:16px" aria-label="Открыть хранение вещей"><span class="tile-icon" aria-hidden="true">🏠</span><b>Хранение</b><span>Карта дома: комнаты, шкафы и полки по 5S</span></a>
-        <button class="tile" data-action="where"><span class="tile-icon" aria-hidden="true">🔎</span><b>Где что лежит</b><span>Поиск вещей по полкам</span></button>
-        <button class="tile" data-action="intake"><span class="tile-icon" aria-hidden="true">📥</span><b>Положить вещь</b><span>Система сама подберёт место по 5S</span></button>
-        <button class="tile accent" data-action="today"><span class="tile-icon" aria-hidden="true">☀️</span><b>Сегодня</b><span>Блюда, порции и готовка по шагам</span></button>
-        <button class="tile" data-action="inventory"><span class="tile-icon" aria-hidden="true">🥬</span><b>Остатки</b><span>Что реально есть дома</span></button>
-        <button class="tile" data-action="rules"><span class="tile-icon" aria-hidden="true">❤️</span><b>Правила семьи</b><span>Аллергии, запреты, предпочтения</span></button>
-        <button class="tile" data-action="profile"><span class="tile-icon" aria-hidden="true">🎯</span><b>Вес и цели</b><span>Муж, жена, ребёнок и бюджет</span></button>
-        <button class="tile" data-action="insights"><span class="tile-icon" aria-hidden="true">📊</span><b>Дневник питания</b><span>Оценки, сытость и любимые блюда</span></button>
-        <button class="tile" data-action="replace"><span class="tile-icon" aria-hidden="true">🔄</span><b>Заменить блюдо</b><span>Безопасная ручная замена в меню</span></button>
-        <button class="tile" data-action="feedback"><span class="tile-icon" aria-hidden="true">⭐</span><b>Отзывы</b><span>Вкус, порции, сытость, комментарии</span></button>
-
-        <button class="tile accent" data-action="ai-export"><span class="tile-icon" aria-hidden="true">✨</span><b>Создать меню</b><span>Готовый промт для ChatGPT</span></button>
-        <button class="tile accent" data-action="ai-import"><span class="tile-icon" aria-hidden="true">📥</span><b>Загрузить меню</b><span>Проверить JSON и посчитать покупки</span></button>
-
-        <button class="tile" data-action="week"><span class="tile-icon" aria-hidden="true">🍽️</span><b>Меню недели</b><span>То, что импортировано из ChatGPT</span></button>
-        <button class="tile" data-action="shopping"><span class="tile-icon" aria-hidden="true">🛒</span><b>Покупки</b><span>Два захода: воскресенье и четверг</span></button>
-      </div>
-
-      <div id="placeholder" class="card hidden"></div>
-    </section>
-  </main>
+  <!-- Каркас (шапка, вкладки, экраны) строит app-v2.js: так новый вид появляется,
+       даже если Telegram показал эту страницу из кэша. -->
+  <main class="app"></main>
 
   <script>
     const appScript = document.createElement("script");

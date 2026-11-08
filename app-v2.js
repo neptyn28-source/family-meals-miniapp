@@ -2,22 +2,183 @@ const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_1uec0985MtG3wzW-FaXvdw_O2P3nLoZ
 const SUPABASE_FUNCTIONS = "https://vwapvcpodwvfzfmtoxhz.supabase.co/functions/v1";
 const tg = window.Telegram?.WebApp;
 
+// ---------- Каркас приложения: шапка, экран, нижнее меню ----------
+// Строим его здесь, а не в index.html: Telegram может показать старую страницу из кэша,
+// а этот скрипт загружается заново всегда.
+const BUDGET_URL = "./family-budget/?v=20261108";
+const TABS = {
+  today: { icon: "☀️", label: "Сегодня" },
+  menu: { icon: "🍽️", label: "Меню", title: "Меню и покупки" },
+  home: { icon: "🥬", label: "Дом", title: "Дом" },
+  budget: { icon: "💰", label: "Бюджет", title: "Бюджет" },
+  things: { icon: "🔎", label: "Вещи", title: "Вещи" },
+};
+const TAB_ORDER = Object.keys(TABS);
+
+(function buildShell() {
+  // свежая таблица стилей, мимо кэша Telegram
+  const css = document.querySelector('link[rel="stylesheet"][href^="styles.css"]');
+  const fresh = document.createElement("link");
+  fresh.rel = "stylesheet";
+  fresh.href = "styles.css?v=" + Date.now();
+  if (css) css.replaceWith(fresh); else document.head.appendChild(fresh);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", "#0b1411");
+
+  const app = document.querySelector("main.app") || document.body.appendChild(Object.assign(document.createElement("main"), { className: "app" }));
+  app.innerHTML = `
+    <header class="topbar"><div class="eyebrow" id="topEyebrow"></div><h1 id="topTitle">ДОМА</h1></header>
+    <section id="authCard" class="card auth">
+      <div class="logo" aria-hidden="true">🏡</div>
+      <h2 id="status">Подключаем Telegram…</h2>
+      <p id="authText">Проверяем пользователя через Telegram.</p>
+      <button id="retryBtn" hidden>Повторить</button>
+    </section>
+    <section id="placeholder" class="view hidden" aria-live="polite"></section>
+    <nav class="tabbar hidden" id="tabbar" aria-label="Разделы">
+      <span class="tab-pill" aria-hidden="true"></span>
+      ${TAB_ORDER.map((id) => `<button class="tab" data-tab="${id}" aria-label="${TABS[id].label}"><i aria-hidden="true">${TABS[id].icon}</i>${TABS[id].label}</button>`).join("")}
+    </nav>`;
+})();
+
 const statusEl = document.querySelector("#status");
 const authCard = document.querySelector("#authCard");
 const authText = document.querySelector("#authText");
 const retryBtn = document.querySelector("#retryBtn");
-const home = document.querySelector("#home");
-const hello = document.querySelector("#hello");
 const placeholder = document.querySelector("#placeholder");
+const tabbar = document.querySelector("#tabbar");
 
 let initData = "";
 let bootstrapData = null;
 let activeWeekStart = getMonday(new Date());
 let editingInventoryId = null;
+let nav = { tab: "today", root: true, sub: "find" };
+let budgetFrame = null;
 
 if (tg) {
   tg.ready();
   tg.expand();
+  try { tg.setHeaderColor?.("#0b1411"); } catch {}
+  try { tg.setBackgroundColor?.("#0b1411"); } catch {}
+  try { tg.setBottomBarColor?.("#0b1411"); } catch {}
+  tg.BackButton?.onClick?.(() => goBack());
+}
+
+function haptic(kind = "select") {
+  try {
+    if (kind === "select") tg?.HapticFeedback?.selectionChanged?.();
+    else tg?.HapticFeedback?.impactOccurred?.(kind);
+  } catch {}
+}
+
+function memberName() {
+  return bootstrapData?.member?.name || bootstrapData?.telegram_user?.first_name || "";
+}
+
+function setTopbar(tab) {
+  const today = new Intl.DateTimeFormat("ru-RU", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+  document.querySelector("#topEyebrow").textContent = today;
+  const name = memberName();
+  document.querySelector("#topTitle").innerHTML = tab === "today"
+    ? escapeHtml(name ? `Привет, ${name}` : "Сегодня") + ' <span class="spark" aria-hidden="true">✦</span>'
+    : escapeHtml(TABS[tab].title);
+}
+
+function markTab(tab) {
+  const index = TAB_ORDER.indexOf(tab);
+  tabbar.querySelectorAll(".tab").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("on", on);
+    if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
+  tabbar.querySelector(".tab-pill").style.transform = `translateX(${index * 100}%)`;
+  document.body.dataset.tab = tab;
+  setTopbar(tab);
+}
+
+function updateBackButton() {
+  const showBack = !nav.root && nav.tab !== "budget";
+  document.body.classList.toggle("is-sub", showBack);
+  try { showBack ? tg?.BackButton?.show?.() : tg?.BackButton?.hide?.(); } catch {}
+}
+
+function goTab(tab, { silent = false } = {}) {
+  if (!TABS[tab]) tab = "today";
+  if (!silent) haptic();
+  nav = { ...nav, tab, root: true };
+  markTab(tab);
+  updateBackButton();
+  if (tab === "budget") {
+    stopCookingTimer();
+    if (!budgetFrame) {
+      budgetFrame = document.createElement("iframe");
+      budgetFrame.className = "budget-frame";
+      budgetFrame.title = "Семейный бюджет";
+      budgetFrame.src = BUDGET_URL;
+      document.body.appendChild(budgetFrame);
+    }
+    budgetFrame.classList.remove("hidden");
+    return;
+  }
+  budgetFrame?.classList.add("hidden");
+  if (tab === "today") return showToday();
+  if (tab === "menu" || tab === "home") return renderHub(tab);
+  if (tab === "things") return nav.sub === "put" ? showIntake() : showWhereThings();
+}
+
+// Открыть вложенный экран вкладки (с кнопкой «назад»).
+function openSub(tab, run) {
+  if (nav.tab !== tab) markTab(tab);
+  budgetFrame?.classList.add("hidden");
+  nav = { ...nav, tab, root: false };
+  haptic("light");
+  run();
+}
+
+function goBack() {
+  if (nav.root) return;
+  placeholder.classList.add("back");
+  goTab(nav.tab, { silent: true });
+  setTimeout(() => placeholder.classList.remove("back"), 450);
+}
+
+function panelChrome() {
+  if (nav.tab === "things") {
+    const put = nav.sub === "put";
+    return `<div class="segmented ${put ? "put" : ""}" role="tablist"><span class="seg-pill" aria-hidden="true"></span>
+      <button data-seg="find" class="${put ? "" : "on"}" role="tab" aria-selected="${!put}">🔎 Найти</button>
+      <button data-seg="put" class="${put ? "on" : ""}" role="tab" aria-selected="${put}">📥 Положить</button></div>`;
+  }
+  if (!nav.root && TABS[nav.tab]) {
+    return `<button class="backbar" data-back><span aria-hidden="true">‹</span>${escapeHtml(TABS[nav.tab].label)}</button>`;
+  }
+  return "";
+}
+
+function bindPanelChrome() {
+  placeholder.querySelector("[data-back]")?.addEventListener("click", goBack);
+  placeholder.querySelectorAll("[data-seg]").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.seg === nav.sub) return;
+    haptic();
+    nav.root = true;
+    if (b.dataset.seg === "put") showIntake(); else showWhereThings();
+  }));
+}
+
+// Индикатор загрузки вместо голого «Загружаем…»
+const LOADING_RE = /^(Загруж|Подключ|Смотрю|Сохраня|Создаём|Проверя|Считаю|Собира|Импортиру|Ищу)/;
+let loadingScan = 0;
+function scanLoading() {
+  loadingScan = 0;
+  placeholder.querySelectorAll("div,p,span").forEach((el) => {
+    const on = el.childElementCount === 0 && LOADING_RE.test(el.textContent.trim());
+    if (on !== el.classList.contains("is-loading")) el.classList.toggle("is-loading", on);
+  });
+}
+new MutationObserver(() => { if (!loadingScan) loadingScan = requestAnimationFrame(scanLoading); })
+  .observe(placeholder, { childList: true, subtree: true, characterData: true });
+
+function skeleton(count = 3, small = false) {
+  return Array.from({ length: count }, () => `<div class="skeleton${small ? " sm" : ""}" aria-hidden="true"></div>`).join("");
 }
 
 function escapeHtml(value) {
@@ -28,33 +189,60 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+// Внешний вид полей и кнопок задаёт styles.css; здесь остаются только частные правки экрана.
 function inputStyle(extra = "") {
-  return [
-    "width:100%",
-    "padding:11px 12px",
-    "border-radius:10px",
-    "border:1px solid #555",
-    "box-sizing:border-box",
-    extra,
-  ].filter(Boolean).join(";");
+  return extra;
 }
 
 function buttonStyle(extra = "") {
-  return [
-    "padding:11px 14px",
-    "border:0",
-    "border-radius:10px",
-    "font-weight:750",
-    "cursor:pointer",
-    extra,
-  ].filter(Boolean).join(";");
+  return extra;
 }
 
 function showPanel(html) {
   stopCookingTimer();
   placeholder.classList.remove("hidden");
-  placeholder.innerHTML = html;
-  placeholder.scrollIntoView({ behavior: "smooth", block: "start" });
+  placeholder.innerHTML = panelChrome() + '<div class="screen">' + html + "</div>";
+  bindPanelChrome();
+  updateBackButton();
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+function renderHub(tab) {
+  const weekly = (run) => () => { activeWeekStart = defaultPlanningMonday(); run(); };
+  const groups = tab === "menu" ? [
+    ["Неделя", [
+      { icon: "🍽️", title: "Меню недели", text: "Блюда, порции и рецепты по дням", run: weekly(showWeek) },
+      { icon: "🛒", title: "Покупки", text: "Два захода: воскресенье и четверг", run: weekly(showShopping) },
+      { icon: "⭐", title: "Отзывы на блюда", text: "Вкус, порция, сытость — учтём в новом меню", run: () => { activeWeekStart = getMonday(new Date()); showFeedback(); } },
+    ]],
+    ["Новое меню", [
+      { icon: "✨", title: "Создать меню", text: "Готовый запрос для ChatGPT", accent: true, run: weekly(showAiExport) },
+      { icon: "📥", title: "Загрузить меню", text: "Вставить ответ ChatGPT и посчитать покупки", run: showAiImport },
+      { icon: "🔄", title: "Заменить блюдо", text: "Ручная замена в меню недели", run: showMealReplacement },
+    ]],
+  ] : [
+    ["Кухня", [
+      { icon: "🥬", title: "Остатки", text: "Что реально есть дома", run: showInventory },
+      { icon: "❤️", title: "Правила семьи", text: "Аллергии, запреты, предпочтения", run: showRules },
+      { icon: "🎯", title: "Вес и цели", text: "Муж, жена, ребёнок и бюджет на еду", run: showProfile },
+    ]],
+    ...(bootstrapData?.member?.role === "husband" ? [["Семья", [
+      { icon: "💌", title: "Пригласить жену", text: "Код, чтобы подключиться к семье", run: showInvite },
+    ]]] : []),
+  ];
+  const items = groups.flatMap(([, list]) => list);
+  showPanel(groups.map(([name, list]) =>
+    '<div class="hub-group">' + escapeHtml(name) + '</div><div class="hub-list">' + list.map((item) =>
+      '<button class="hub-item' + (item.accent ? " accent" : "") + '" data-hub="' + items.indexOf(item) + '">' +
+      '<span class="hub-icon" aria-hidden="true">' + item.icon + "</span><span><b>" + escapeHtml(item.title) + "</b><small>" +
+      escapeHtml(item.text) + '</small></span><span class="chev" aria-hidden="true">›</span></button>').join("") + "</div>").join(""));
+  placeholder.querySelectorAll("[data-hub]").forEach((b) => b.addEventListener("click", () => openSub(tab, items[Number(b.dataset.hub)].run)));
+}
+
+function showInvite() {
+  showPanel('<h2>💌 Пригласить жену</h2><p>Создай код и отправь его жене. Она откроет бота и введёт код — у вас будет общая семейная база.</p>' +
+    '<button id="inviteWifeBtn" style="width:100%">Создать код приглашения</button><div id="inviteResult" style="margin-top:8px"></div>');
+  document.querySelector("#inviteWifeBtn").addEventListener("click", createInvite);
 }
 
 async function callFunction(functionName, action, payload = {}) {
@@ -192,10 +380,9 @@ async function authenticate() {
   try {
     bootstrapData = await api("bootstrap");
     statusEl.textContent = "Telegram подключён";
-    hello.textContent = `Привет, ${bootstrapData.member?.name || bootstrapData.telegram_user?.first_name || "семья"}!`;
     authCard.classList.add("hidden");
-    home.classList.remove("hidden");
-    addInviteButton();
+    tabbar.classList.remove("hidden");
+    goTab(startTab(), { silent: true });
   } catch (error) {
     if (error.code === "not_invited") {
       showJoinFamily();
@@ -245,17 +432,10 @@ function showJoinFamily() {
   });
 }
 
-function addInviteButton() {
-  if (bootstrapData?.member?.role !== "husband" || document.querySelector("#inviteWifeBtn")) return;
-  const card = hello.parentElement;
-  const wrap = document.createElement("div");
-  wrap.style.marginTop = "14px";
-  wrap.innerHTML = `
-    <button id="inviteWifeBtn" style="${buttonStyle("width:100%")}">Пригласить жену</button>
-    <div id="inviteResult" style="margin-top:8px"></div>
-  `;
-  card.appendChild(wrap);
-  document.querySelector("#inviteWifeBtn").addEventListener("click", createInvite);
+// Вкладку можно открыть ссылкой: ?tab=menu (например, из бюджета).
+function startTab() {
+  const tab = new URLSearchParams(location.search).get("tab");
+  return TABS[tab] ? tab : "today";
 }
 
 async function createInvite() {
@@ -1010,7 +1190,7 @@ async function showShopping() {
 
 async function showFeedback() {
   showPanel(
-    weekChooser("fb", "Отзывы", "Заполняй вкус, размер порции, сытость и комментарии. Следующая выгрузка в ChatGPT включит эти данные.") +
+    weekChooser("fb", "Отзывы на блюда", "Заполняй вкус, размер порции, сытость и комментарии. Следующая выгрузка в ChatGPT включит эти данные.") +
     '<div id="fbStatus" class="muted">Загружаем…</div><div id="fbContent"></div>'
   );
   bindWeekNav("fb", showFeedback);
@@ -1032,7 +1212,7 @@ async function showFeedback() {
 
     content.innerHTML = meals.map((meal) => `
       <details class="feedback-meal">
-        <summary><b>${escapeHtml(meal.meal_date)}</b> · ${escapeHtml(mealTypeLabel(meal.meal_type))} · ${escapeHtml(meal.title)}</summary>
+        <summary><b>${escapeHtml(dayTitle(String(meal.meal_date).slice(0, 10) + "T12:00:00"))}</b> · ${escapeHtml(mealTypeLabel(meal.meal_type))}<br><span style="color:var(--text)">${escapeHtml(meal.title)}</span></summary>
         <div class="feedback-grid">
           ${people.map((person) => feedbackForm(meal, person, saved.get(`${meal.id}|${person.id}`) || {})).join("")}
         </div>
@@ -1118,26 +1298,27 @@ const todayMealOrder = ["breakfast", "snack1", "lunch", "snack2", "dinner"];
 async function showToday() {
   const today = isoDate(new Date());
   activeWeekStart = getMonday(new Date());
-  showPanel('<h2>☀️ Сегодня · ' + escapeHtml(dayTitle(today + "T12:00:00")) + '</h2><p>Твоё меню на сегодня. Открой блюдо, чтобы посмотреть порции или начать готовить.</p><div id="todayContent" class="muted">Загружаем меню…</div>');
+  showPanel('<p class="lead">Меню на сегодня. Открой блюдо, чтобы посмотреть порции или начать готовить.</p><div id="todayContent">' + skeleton(3) + '</div>');
   const target = document.querySelector("#todayContent");
   try {
     const data = await api("week.get", { week_start: isoDate(activeWeekStart) });
     if (!target.isConnected) return;
     const meals = (data.meals || []).filter((m) => String(m.meal_date).slice(0, 10) === today);
     if (!meals.length) {
-      target.innerHTML = '<p>На сегодня меню пока нет. Создай и загрузи меню на текущую неделю.</p><button id="todayWeekBtn">Открыть меню недели</button>';
-      document.querySelector("#todayWeekBtn").addEventListener("click", showWeek);
+      target.innerHTML = '<div class="card"><h3 style="margin-top:0">На сегодня меню пока нет</h3><p>Создай меню через ChatGPT и загрузи его — здесь появятся блюда дня.</p><button id="todayWeekBtn" style="width:100%">✨ Создать меню</button></div>';
+      document.querySelector("#todayWeekBtn").addEventListener("click", () => openSub("menu", () => { activeWeekStart = defaultPlanningMonday(); showAiExport(); }));
       return;
     }
     const byType = new Map(meals.map((m) => [m.meal_type, m]));
     target.innerHTML = todayMealOrder.map((type) => {
       const m = byType.get(type);
-      if (!m) return '<article class="today-meal"><div class="muted">' + escapeHtml(mealTypeLabel(type)) + '</div><p>Не заполнено</p></article>';
+      if (!m) return '<article class="today-meal empty"><div class="muted">' + escapeHtml(mealTypeLabel(type)) + '</div><span>—</span></article>';
       const steps = Array.isArray(m.recipe?.steps) ? m.recipe.steps : [];
       const key = today + "|" + type;
       return '<article class="today-meal"><div class="muted">' + escapeHtml(mealTypeLabel(type)) + '</div><h3>' + escapeHtml(m.title) + '</h3>' +
         mealDetails(m) + (steps.length ? '<button class="cook-open" data-cook="' + escapeHtml(key) + '">👩‍🍳 Готовить по шагам</button>' : '') + '</article>';
-    }).join("");
+    }).join("") + '<button id="todayRate" class="today-rate btn-ghost">⭐ Оценить блюда</button>';
+    document.querySelector("#todayRate").addEventListener("click", () => openSub("menu", () => { activeWeekStart = getMonday(new Date()); showFeedback(); }));
     target.querySelectorAll("[data-cook]").forEach((btn) => btn.addEventListener("click", () => {
       const type = btn.dataset.cook.split("|")[1];
       const meal = byType.get(type);
@@ -1209,10 +1390,12 @@ function showCookingMode(meal) {
   let index = 0;
   stopCookingTimer();
   const timerMarkup = '<div class="cook-timer subcard"><b>⏱ Таймер готовки</b><div id="cookTimerClock" role="timer" aria-live="off">05:00</div><div class="cook-timer-buttons"><button data-timer-min="5">5 мин</button><button data-timer-min="10">10 мин</button><button data-timer-min="15">15 мин</button><button data-timer-min="30">30 мин</button></div><div class="cook-timer-buttons"><button id="timerStart">Старт</button><button id="timerPause">Пауза</button><button id="timerReset">Сброс</button></div><div id="cookTimerStatus" class="muted" aria-live="polite">Таймер работает, пока открыт рецепт.</div></div>';
-  showPanel(timerMarkup + '<div class="cook-mode"><button id="cookBack">← К сегодняшнему меню</button><h2>' + escapeHtml(meal.title) + '</h2><div id="cookProgress" class="muted"></div><div id="cookStep" class="cook-step" aria-live="polite"></div><div class="cook-controls"><button id="cookPrev">← Назад</button><button id="cookNext">Далее →</button></div><div class="subcard"><h3>Ингредиенты на всю готовку</h3><ul>' + (Array.isArray(meal.ingredients) ? meal.ingredients.map((x) => '<li>' + escapeHtml(x.name) + ' — ' + escapeHtml(amount(x.amount)) + ' ' + escapeHtml(x.unit) + '</li>').join("") : "") + '</ul></div>' + (recipe.child_adaptation ? '<p><b>Ребёнку:</b> ' + escapeHtml(recipe.child_adaptation) + '</p>' : '') + '</div>');
+  showPanel('<div class="cook-mode"><button id="cookBack">← К сегодняшнему меню</button><h2>' + escapeHtml(meal.title) + '</h2><div id="cookProgress" class="muted"></div><div id="cookStep" class="cook-step" aria-live="polite"></div><div class="cook-controls"><button id="cookPrev">← Назад</button><button id="cookNext">Далее →</button></div>' + timerMarkup + '<div class="subcard"><h3>Ингредиенты на всю готовку</h3><ul>' + (Array.isArray(meal.ingredients) ? meal.ingredients.map((x) => '<li>' + escapeHtml(x.name) + ' — ' + escapeHtml(amount(x.amount)) + ' ' + escapeHtml(x.unit) + '</li>').join("") : "") + '</ul></div>' + (recipe.child_adaptation ? '<p><b>Ребёнку:</b> ' + escapeHtml(recipe.child_adaptation) + '</p>' : '') + '</div>');
   const render = () => {
     document.querySelector("#cookProgress").textContent = "Шаг " + (index + 1) + " из " + steps.length;
-    document.querySelector("#cookStep").textContent = steps[index];
+    const stepEl = document.querySelector("#cookStep");
+    stepEl.textContent = steps[index];
+    stepEl.style.animation = "none"; void stepEl.offsetWidth; stepEl.style.animation = "";
     document.querySelector("#cookPrev").disabled = index === 0;
     document.querySelector("#cookNext").textContent = index === steps.length - 1 ? "Готово ✓" : "Далее →";
   };
@@ -1223,44 +1406,6 @@ function showCookingMode(meal) {
   render();
 }
 
-
-async function showFoodDiary() {
-  activeWeekStart = getMonday(new Date());
-  showPanel(weekChooser("diary", "📊 Семейный дневник", "Фактические отзывы и сытость взрослых. КБЖУ здесь не рассчитываются: для точных цифр нужны проверенные составы продуктов и съеденные порции.") + '<div id="diaryStatus" class="muted">Загружаем…</div><div id="diaryContent"></div>');
-  bindWeekNav("diary", showFoodDiaryForWeek);
-  await loadFoodDiary();
-}
-async function showFoodDiaryForWeek() { await loadFoodDiary(); }
-async function loadFoodDiary() {
-  const status = document.querySelector("#diaryStatus");
-  const content = document.querySelector("#diaryContent");
-  if (!status || !content) return;
-  status.textContent = "Загружаем…";
-  try {
-    const week = await api("week.get", { week_start: isoDate(activeWeekStart) });
-    const data = await api("feedback.list", { week_id: week.week.id });
-    if (!status.isConnected) return;
-    const mealMap = new Map((week.meals || []).map((m) => [String(m.id), m]));
-    const feedback = (data.feedback || []).filter((x) => mealMap.has(String(x.meal_id)));
-    const adults = (data.members || []).filter((m) => ["husband","wife"].includes(m.role));
-    status.textContent = weekRange(activeWeekStart) + " · " + feedback.length + " записей";
-    content.innerHTML = adults.map((person) => {
-      const rows = feedback.filter((x) => String(x.member_id) === String(person.id));
-      const rated = rows.filter((x) => x.taste);
-      const liked = rated.filter((x) => x.taste === "liked").length;
-      const satiety = rows.map((x) => Number(x.satiety)).filter((x) => Number.isFinite(x) && x > 0);
-      const average = satiety.length ? (satiety.reduce((a,b) => a+b,0)/satiety.length).toFixed(1) : "—";
-      const favorites = rows.filter((x) => x.taste === "liked").map((x) => mealMap.get(String(x.meal_id))?.title).filter(Boolean);
-      const unique = [...new Set(favorites)];
-      return '<article class="diary-person"><h3>' + escapeHtml(person.role === "wife" ? "👩 Жена" : "👨 Муж") + '</h3>' +
-        '<div class="diary-stats"><div><b>' + rows.length + '</b><span>записей</span></div><div><b>' + liked + '</b><span>понравилось</span></div><div><b>' + escapeHtml(average) + '</b><span>сытость (оценка)</span></div></div>' +
-        '<p><b>Любимые блюда:</b> ' + (unique.length ? unique.slice(0,6).map(escapeHtml).join(", ") : "пока нет оценок") + '</p></article>';
-    }).join("") + '<p class="muted">Это журнал обратной связи, а не подтверждение фактически съеденных калорий. Для внесения оценок открой раздел «Отзывы».</p><button id="diaryFeedbackBtn" class="cook-open">Оценить блюда</button>';
-    document.querySelector("#diaryFeedbackBtn").addEventListener("click", () => { activeWeekStart = getMonday(new Date()); showFeedback(); });
-  } catch (error) {
-    if (status.isConnected) status.textContent = "Ошибка дневника: " + error.message;
-  }
-}
 
 async function showMealReplacement() {
   activeWeekStart = defaultPlanningMonday();
@@ -1329,7 +1474,10 @@ function wmsItemCard(item) {
 }
 
 async function showWhereThings() {
-  showPanel('<h2>🔎 Где что лежит</h2><p>Поиск вещей по комнатам, шкафам и полкам из раздела «Хранение».</p>' +
+  nav.sub = "find";
+  if (nav.tab !== "things") { markTab("things"); budgetFrame?.classList.add("hidden"); }
+  nav.root = true;
+  showPanel('<h2>🔎 Где что лежит</h2><p>Поиск вещей по комнатам, шкафам и полкам.</p>' +
     '<input id="wmsSearch" type="search" placeholder="Например: аптечка, носки, крупы" autocomplete="off" style="' + inputStyle() + '">' +
     '<div id="wmsCategories" style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0"></div>' +
     '<div id="wmsResult" class="muted">Загружаем вещи…</div>');
@@ -1343,7 +1491,7 @@ async function showWhereThings() {
   }
   if (!result.isConnected) return;
   if (!items.length) {
-    result.textContent = "Вещей пока нет. Они появятся здесь, когда их разложат по полкам в «Хранении».";
+    result.textContent = "Вещей пока нет. Нажми «Положить», чтобы убрать первую вещь.";
     return;
   }
 
@@ -1356,7 +1504,7 @@ async function showWhereThings() {
   function drawChips() {
     chips.innerHTML = ["", ...categories].map((c) =>
       '<button type="button" data-category="' + escapeHtml(c) + '" style="' +
-      buttonStyle("padding:6px 10px;font-weight:600;" + (c === category ? "background:#2f6f4e;color:#fff" : "")) + '">' +
+      buttonStyle("padding:6px 10px;font-weight:600;" + (c === category ? "background:var(--accent);color:var(--accent-ink);border-color:transparent" : "")) + '">' +
       escapeHtml(c || "Все") + "</button>").join("");
     chips.querySelectorAll("[data-category]").forEach((btn) => btn.addEventListener("click", () => {
       category = btn.dataset.category;
@@ -1379,7 +1527,7 @@ async function showWhereThings() {
     let html = "";
     if (draft.aiUsed && draft.category) {
       html += "<p>«" + escapeHtml(search.value.trim()) + "» — это, похоже, <b>" + escapeHtml(draft.category) + "</b>." +
-        (places.length ? " Такие вещи у вас лежат здесь:" : " Вещей этой категории в «Хранении» пока нет.") + "</p>";
+        (places.length ? " Такие вещи у вас лежат здесь:" : " Вещей этой категории пока нет.") + "</p>";
       html += places.map((i) => '<article class="row-card"><div><b>' + escapeHtml(wmsPlaceText(i.place)) + " → " + escapeHtml(i.place.shelf) +
         '</b><div class="muted">' + escapeHtml(i.name) + "</div></div></article>").join("");
     }
@@ -1410,7 +1558,7 @@ async function showWhereThings() {
     const found = items.filter((i) => (!category || i.category === category) && words.every((w) => haystack.get(i).includes(w)));
     if (!found.length) {
       const query = wmsSearchText(search.value).trim();
-      result.innerHTML = "<p>По названию в «Хранении» ничего не нашлось.</p>" +
+      result.innerHTML = "<p>По названию ничего не нашлось.</p>" +
         (query.length >= 3 ? '<div id="wmsGuess" class="muted">Смотрю, что это за вещь…</div>' : "<p>Попробуй другое слово или выбери «Все».</p>");
       scheduleGuess(query);
       return;
@@ -1463,11 +1611,14 @@ function wmsPhotoToJpeg(file) {
 function wmsChoiceButtons(name, choices, selected) {
   return '<div style="display:flex;flex-wrap:wrap;gap:6px">' + choices.map(([value, label]) =>
     '<button type="button" data-choice="' + name + '" data-value="' + value + '" style="' +
-    buttonStyle("padding:8px 11px;font-weight:600;" + (value === selected ? "background:#2f6f4e;color:#fff" : "")) + '">' +
+    buttonStyle("padding:8px 11px;font-weight:600;" + (value === selected ? "background:var(--accent);color:var(--accent-ink);border-color:transparent" : "")) + '">' +
     escapeHtml(label) + "</button>").join("") + "</div>";
 }
 
 async function showIntake(prefill = null) {
+  nav.sub = "put";
+  if (nav.tab !== "things") { markTab("things"); budgetFrame?.classList.add("hidden"); }
+  nav.root = true;
   showPanel('<h2>📥 Положить вещь</h2><p>Сфотографируй вещь или опиши её — система сама решит, куда её убрать по 5S.</p>' +
     '<div class="form-grid"><label for="intakeText">Что убираем?</label>' +
     '<input id="intakeText" maxlength="300" placeholder="Например: зимняя куртка жены, дрель, таблетки" style="' + inputStyle() + '">' +
@@ -1533,8 +1684,9 @@ function showIntakeDraft(step, draft, categories) {
     item[btn.dataset.choice] = btn.dataset.value;
     step.querySelectorAll('[data-choice="' + btn.dataset.choice + '"]').forEach((b) => {
       const on = b === btn;
-      b.style.background = on ? "#2f6f4e" : "";
-      b.style.color = on ? "#fff" : "";
+      b.style.background = on ? "var(--accent)" : "";
+      b.style.color = on ? "var(--accent-ink)" : "";
+      b.style.borderColor = on ? "transparent" : "";
     });
   }));
 
@@ -1630,49 +1782,11 @@ function showIntakeSuggestions(result, profile, suggestions) {
   }));
 }
 
-// Telegram может показать index.html из кэша, а app-v2.js грузится заново всегда:
-// добавляем плитки сами, если в старой странице их ещё нет.
-function ensureWmsTile(action, html) {
-  if (document.querySelector('.tile[data-action="' + action + '"]')) return;
-  const tile = document.createElement("button");
-  tile.className = "tile";
-  tile.dataset.action = action;
-  tile.innerHTML = html;
-  const anchor = document.querySelector('.tile[data-action="where"]') || document.querySelector('.tile[href*="home-wms"]');
-  if (anchor) anchor.after(tile);
-  else document.querySelector(".grid")?.prepend(tile);
-}
-ensureWmsTile("where", '<span class="tile-icon" aria-hidden="true">🔎</span><b>Где что лежит</b><span>Поиск вещей по полкам</span>');
-ensureWmsTile("intake", '<span class="tile-icon" aria-hidden="true">📥</span><b>Положить вещь</b><span>Система сама подберёт место по 5S</span>');
-
-document.querySelectorAll(".tile").forEach((button) => {
-  button.addEventListener("click", async () => {
-    const action = button.dataset.action;
-    if (action === "where") return showWhereThings();
-    if (action === "intake") return showIntake();
-    if (action === "today") return showToday();
-    if (action === "insights") return showFoodDiary();
-    if (action === "replace") return showMealReplacement();
-    if (action === "inventory") return showInventory();
-    if (action === "rules") return showRules();
-    if (action === "profile") return showProfile();
-    if (action === "feedback") {
-      activeWeekStart = getMonday(new Date());
-      return showFeedback();
-    }
-    if (action === "ai-export") {
-      activeWeekStart = defaultPlanningMonday();
-      return showAiExport();
-    }
-    if (action === "ai-import") return showAiImport();
-    if (action === "week") {
-      activeWeekStart = defaultPlanningMonday();
-      return showWeek();
-    }
-    if (action === "shopping") {
-      activeWeekStart = defaultPlanningMonday();
-      return showShopping();
-    }
+tabbar.querySelectorAll(".tab").forEach((button) => {
+  button.addEventListener("click", () => {
+    const tab = button.dataset.tab;
+    if (tab === nav.tab && nav.root && tab !== "today") return;
+    goTab(tab);
   });
 });
 
