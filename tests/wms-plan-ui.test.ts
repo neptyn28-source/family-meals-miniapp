@@ -121,3 +121,15 @@ test("plan ui: wall shelves are separate boards hanging like a ladder", () => {
   assert.ok(L.cells[1].x > L.cells[0].x && L.cells[2].x > L.cells[1].x, "каждая следующая сдвинута");
   assert.match(suggestSize(f).why, /лесенкой/);
 });
+
+test("plan ui: shelves never overlap even if stored heights are too big; rod stops at the shelf below", () => {
+  const { frontLayout } = sandbox.window.WmsPlan._test;
+  const cell = (from: number, height: number, type = "shelf") => ({ id: String(from), label: "П", from, width: 70, depth: 45, height, type, items: [] });
+  // Как шкаф под варочной панелью: полка 1 на 19 см «высотой 29», а полка 2 уже на 46 см.
+  const f = { name: "Шкаф", sections: [{ name: "Шкаф", cells: [cell(19, 29), cell(46, 19), cell(150, 110, "rod"), cell(210, 40)] }] };
+  const L = frontLayout(f);
+  const v = L.cells.map((p: any) => [p.c.from, p.v[0], p.v[1]]);
+  const s1 = v.find((x: number[]) => x[0] === 19), s2 = v.find((x: number[]) => x[0] === 46), rod = v.find((x: number[]) => x[0] === 150);
+  assert.ok(s1[2] <= 46, "полка 1 кончается до полки 2");
+  assert.ok(rod[1] >= s2[2], "штанга не залезает в полку 2");
+});

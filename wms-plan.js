@@ -122,7 +122,7 @@
    */
   const OPEN_KINDS = ["desk", "deskRack", "rack", "dining", "vanity"];
   function frontLayout(f) {
-    const GAP = 2.5, kind = kindOf(f.name), out = [];
+    const BOARD = 1.5, GAP = 2.5, kind = kindOf(f.name), out = [];
     const span = (c, h) => (c.type === "rod" ? [Math.max(0, c.from - Math.min(h, c.from)), c.from] : [c.from, c.from + h]);
     const overlaps = (a, b) => Math.min(a[1], b[1]) - Math.max(a[0], b[0]) > 1;
     let base = GAP;
@@ -145,9 +145,23 @@
       const bottom = cells[0];
       const defW = Math.max(30, (bottom && bottom.width) || Math.max(0, ...cells.map((c) => c.width || 0)) || 60);
       const mine = [];
+      // Полка кончается там, где начинается следующая (в данных высота бывает с запасом —
+      // иначе полки рисуются друг на друге). Штанга висит вниз только до полки под ней.
+      const boards = cells.filter((o) => o.type !== "rod");
       cells.forEach((c, i) => {
         const w = Math.max(20, c.width || defW);
         let h = c.height || (c.type === "rod" ? 100 : 8);
+        if (c.type === "rod") {
+          const below = boards.filter((o) => o.from < c.from);
+          const floor = below.length ? Math.max(...below.map((o) => {
+            const nxt = boards.find((n) => n.from > o.from);
+            return o.from + Math.min(o.height || 8, (nxt ? nxt.from : Infinity) - o.from - BOARD);
+          })) : 0;
+          h = Math.max(10, Math.min(h, c.from - floor - BOARD));
+        } else {
+          const next = boards.find((o) => o.from > c.from);
+          if (next) h = Math.max(4, Math.min(h, next.from - c.from - BOARD));
+        }
         const above = cells.slice(i + 1).some((o) => o.type !== "rod" && o.from < c.from + h - 1);
         const open = c.type !== "rod" && !above && i === cells.length - 1 && h > 50;
         if (open) h = 50;
