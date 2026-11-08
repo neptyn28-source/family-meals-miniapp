@@ -279,6 +279,11 @@ async function main(req: Request) {
       return reply({ ok: false, error: "not_invited", message: "Этот Telegram-аккаунт не привязан к семье" }, 403);
     }
     const familyId = String(member.family_id);
+    const ownCell = async (cellId: string) => {
+      const { data, error } = await db.from("wms_cells").select("id").eq("family_id", familyId).eq("id", cellId).maybeSingle();
+      if (error) throw error;
+      return !!data;
+    };
 
     // Визуальный план: квартира, мебель на ней и полки с вещами — одним ответом.
     if (action === "wms.plan.load") {
@@ -429,7 +434,7 @@ async function main(req: Request) {
       const { data, error } = await db
         .from("wms_items")
         .select(
-          "id, name, category, quantity, usage_frequency, wms_cells(label, height_from_floor_cm, zone_type, position, wms_modules(name, position, wms_locations(name, position)))",
+          "id, cell_id, name, category, quantity, usage_frequency, weight_class, width_cm, height_cm, depth_cm, can_hang, can_fold, hazardous, wms_cells(id, label, height_from_floor_cm, zone_type, position, wms_modules(name, position, wms_locations(name, position)))",
         )
         .eq("family_id", familyId);
       if (error) throw error;
@@ -497,19 +502,12 @@ async function main(req: Request) {
       return reply({ ok: true, suggestions });
     }
 
-    // Положить вещь на выбранную полку.
+    // Положить вещь на выбранную полку — или сохранить «без места» (cell_id: null), разложить потом.
     if (action === "wms.items.add") {
       const item = profile(payload.item);
-      const cellId = uuid(payload.cell_id);
+      const cellId = payload.cell_id == null ? null : uuid(payload.cell_id);
       const quantity = payload.quantity == null ? 1 : position(payload.quantity) || 1;
-      const { data: cell, error: cellError } = await db
-        .from("wms_cells")
-        .select("id")
-        .eq("family_id", familyId)
-        .eq("id", cellId)
-        .maybeSingle();
-      if (cellError) throw cellError;
-      if (!cell) return reply({ ok: false, error: "unknown_cell" }, 400);
+      if (cellId && !(await ownCell(cellId))) return reply({ ok: false, error: "unknown_cell" }, 400);
       const { data, error } = await db
         .from("wms_items")
         .insert({
@@ -523,11 +521,31 @@ async function main(req: Request) {
           width_cm: item.size?.width ?? null,
           height_cm: item.size?.height ?? null,
           depth_cm: item.size?.depth ?? null,
+          can_hang: item.canHang,
+          can_fold: item.canFold,
+          hazardous: item.hazardous,
         })
         .select("id")
         .single();
       if (error) throw error;
       return reply({ ok: true, id: data.id });
+    }
+
+    // Разложить вещь «без места» или переложить на другую полку (cell_id: null — снять с полки).
+    if (action === "wms.items.place") {
+      const id = uuid(payload.id);
+      const cellId = payload.cell_id == null ? null : uuid(payload.cell_id);
+      if (cellId && !(await ownCell(cellId))) return reply({ ok: false, error: "unknown_cell" }, 400);
+      const { data, error } = await db
+        .from("wms_items")
+        .update({ cell_id: cellId })
+        .eq("family_id", familyId)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return reply({ ok: false, error: "not_found", message: "Вещь не найдена" }, 404);
+      return reply({ ok: true, id });
     }
 
     if (action === "wms.save") {

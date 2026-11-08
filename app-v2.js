@@ -1526,7 +1526,7 @@ function wmsSearchText(value) {
 }
 
 function wmsPlaceText(place) {
-  if (!place) return "Без полки";
+  if (!place) return "📋 Не разложено";
   return place.location + " · " + place.module;
 }
 
@@ -1536,11 +1536,13 @@ function wmsItemCard(item) {
   const shelf = place
     ? escapeHtml(place.shelf) + " · " + escapeHtml(place.heightFromFloor) + " см от пола" +
       (zone ? ' · <span title="' + escapeHtml(zone.text) + '">' + zone.icon + " " + escapeHtml(zone.text) + "</span>" : "")
-    : "Полка не указана";
+    : "Ещё не разложено — выберите место, когда будет удобно";
   const meta = [item.category, WMS_USAGE[item.usage]].filter(Boolean).map(escapeHtml).join(" · ");
   return '<article class="row-card"><div><b>' + escapeHtml(item.name) + (item.quantity > 1 ? " × " + escapeHtml(item.quantity) : "") +
     '</b><div class="muted">' + shelf + "</div>" + (meta ? '<div class="muted">' + meta + "</div>" : "") + "</div>" +
-    (place ? '<button class="btn-ghost" data-plan-item="' + escapeHtml(item.id) + '" aria-label="Показать на плане">🗺</button>' : "") + "</article>";
+    '<div style="display:flex;gap:6px;flex-shrink:0">' +
+    (place ? '<button class="btn-ghost" data-plan-item="' + escapeHtml(item.id) + '" aria-label="Показать на плане">🗺</button>' : "") +
+    '<button class="' + (place ? "btn-ghost" : "cook-open") + '" data-place-item="' + escapeHtml(item.id) + '">' + (place ? "Переложить" : "Разложить") + "</button></div></article>";
 }
 
 // План квартиры живёт в wms-plan.js: грузим его один раз и мимо кэша Telegram, как и этот файл.
@@ -1608,14 +1610,16 @@ async function showWhereThings() {
   const search = document.querySelector("#wmsSearch");
   const chips = document.querySelector("#wmsCategories");
   const categories = [...new Set(items.map((i) => i.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  const UNPLACED = "__unplaced";
+  const unplacedCount = items.filter((i) => !i.place).length;
   let category = "";
   const haystack = new Map(items.map((i) => [i, wmsSearchText([i.name, i.category, i.place?.location, i.place?.module, i.place?.shelf].join(" "))]));
 
   function drawChips() {
-    chips.innerHTML = ["", ...categories].map((c) =>
+    chips.innerHTML = ["", ...(unplacedCount ? [UNPLACED] : []), ...categories].map((c) =>
       '<button type="button" data-category="' + escapeHtml(c) + '" style="' +
       buttonStyle("padding:6px 10px;font-weight:600;" + (c === category ? "background:var(--accent);color:var(--accent-ink);border-color:transparent" : "")) + '">' +
-      escapeHtml(c || "Все") + "</button>").join("");
+      escapeHtml(c === UNPLACED ? "📋 Не разложено: " + unplacedCount : c || "Все") + "</button>").join("");
     chips.querySelectorAll("[data-category]").forEach((btn) => btn.addEventListener("click", () => {
       category = btn.dataset.category;
       drawChips();
@@ -1665,7 +1669,7 @@ async function showWhereThings() {
 
   function draw() {
     const words = wmsSearchText(search.value).split(/\s+/).filter(Boolean);
-    const found = items.filter((i) => (!category || i.category === category) && words.every((w) => haystack.get(i).includes(w)));
+    const found = items.filter((i) => (!category || (category === UNPLACED ? !i.place : i.category === category)) && words.every((w) => haystack.get(i).includes(w)));
     if (!found.length) {
       const query = wmsSearchText(search.value).trim();
       result.innerHTML = "<p>По названию ничего не нашлось.</p>" +
@@ -1691,7 +1695,9 @@ async function showWhereThings() {
   search.addEventListener("input", draw);
   result.addEventListener("click", (e) => {
     const b = e.target.closest("[data-plan-item]");
-    if (b) { nav.sub = "plan"; showPlan({ focusItemId: b.dataset.planItem }); }
+    if (b) { nav.sub = "plan"; showPlan({ focusItemId: b.dataset.planItem }); return; }
+    const p = e.target.closest("[data-place-item]");
+    if (p) { const item = items.find((i) => i.id === p.dataset.placeItem); if (item) showPlaceLater(item); }
   });
   drawChips();
   draw();
@@ -1793,7 +1799,8 @@ function showIntakeDraft(step, draft, categories) {
     ["width", "height", "depth"].map((k, i) => '<input id="draftSize_' + k + '" type="number" min="1" max="400" inputmode="numeric" placeholder="' +
       ["ширина", "высота", "глубина"][i] + '" value="' + escapeHtml(s[k] ?? "") + '" style="' + inputStyle() + '">').join("") + "</div>" +
     '<div style="display:flex;gap:8px;flex-wrap:wrap"><button id="draftSuggest" class="cook-open">Подобрать место</button>' +
-    '<button id="draftPick" class="btn-ghost">🗺 Выберу сам</button></div></div><div id="draftResult"></div></div>';
+    '<button id="draftPick" class="btn-ghost">🗺 Выберу сам</button>' +
+    '<button id="draftLater" class="btn-ghost">📋 Пока без места</button></div></div><div id="draftResult"></div></div>';
 
   step.querySelectorAll("[data-choice]").forEach((btn) => btn.addEventListener("click", () => {
     item[btn.dataset.choice] = btn.dataset.value;
@@ -1859,6 +1866,16 @@ function showIntakeDraft(step, draft, categories) {
   };
   // Сам выбираю полку на плане — без бота и ИИ.
   step.querySelector("#draftPick").addEventListener("click", () => pickShelfManually(result, readProfile()));
+  // Просто внести в базу, разложить потом («Где что лежит» → «Не разложено»).
+  const laterBtn = step.querySelector("#draftLater");
+  laterBtn.addEventListener("click", async () => {
+    const profile = readProfile();
+    laterBtn.disabled = true;
+    result.textContent = "Сохраняю…";
+    try {
+      await saveIntakeItem(result, profile, null);
+    } catch (error) { result.textContent = "Не сохранилось: " + error.message; laterBtn.disabled = false; }
+  });
   suggestBtn.addEventListener("click", async () => {
     const profile = readProfile();
     suggestBtn.disabled = true;
@@ -1871,7 +1888,7 @@ function showIntakeDraft(step, draft, categories) {
   });
 }
 
-function showIntakeSuggestions(result, profile, suggestions) {
+function showIntakeSuggestions(result, profile, suggestions, itemId = null) {
   if (!suggestions.length) {
     result.innerHTML = "<p>Подходящего места нет: вещь не влезает или все подходящие полки опасны для неё. Попробуй уменьшить размер или снять галочки.</p>";
     return;
@@ -1884,14 +1901,14 @@ function showIntakeSuggestions(result, profile, suggestions) {
       (s.reasons.length ? '<ul class="muted" style="margin:4px 0 6px 18px;padding:0">' + s.reasons.map((r) => "<li>" + escapeHtml(r) + "</li>").join("") + "</ul>" : "") +
       '<button data-place="' + i + '" style="' + buttonStyle() + '">Положу сюда</button></div></article>';
   }).join("") + '<p id="placeStatus" role="status"></p><button id="placePick" class="btn-ghost">🗺 Нет, выберу полку сам</button>';
-  result.querySelector("#placePick").addEventListener("click", () => pickShelfManually(result, profile));
+  result.querySelector("#placePick").addEventListener("click", () => pickShelfManually(result, profile, itemId));
   result.querySelectorAll("[data-place]").forEach((btn) => btn.addEventListener("click", async () => {
     const s = suggestions[Number(btn.dataset.place)];
     const status = result.querySelector("#placeStatus");
     result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = true; });
     status.textContent = "Сохраняю…";
     try {
-      await saveIntakeItem(result, profile, s);
+      await saveIntakeItem(result, profile, s, itemId);
     } catch (error) {
       status.textContent = "Не сохранилось: " + error.message;
       result.querySelectorAll("[data-place]").forEach((b) => { b.disabled = false; });
@@ -1899,17 +1916,55 @@ function showIntakeSuggestions(result, profile, suggestions) {
   }));
 }
 
-async function saveIntakeItem(result, profile, place) {
-  const added = await wmsApi("wms.items.add", { item: profile, cell_id: place.cellId });
-  result.innerHTML = '<div class="success-box">Готово: «' + escapeHtml(profile.name) + "» лежит в " + escapeHtml(place.location) + " → " +
-    escapeHtml(place.module) + " → " + escapeHtml(place.shelf) + '.</div><div style="display:flex;gap:8px;margin-top:10px">' +
-    '<button id="intakeWhere">🗺 Показать на плане</button><button id="intakeMore" class="btn-ghost">Положить ещё</button></div>';
+/** place = null — вещь без места; itemId — вещь уже в базе, её раскладываем или перекладываем. */
+async function saveIntakeItem(result, profile, place, itemId = null) {
+  const cellId = place ? place.cellId : null;
+  const saved = itemId
+    ? await wmsApi("wms.items.place", { id: itemId, cell_id: cellId })
+    : await wmsApi("wms.items.add", { item: profile, cell_id: cellId });
+  const where = place
+    ? "лежит в " + escapeHtml(place.location) + " → " + escapeHtml(place.module) + " → " + escapeHtml(place.shelf) + "."
+    : "сохранена без места. Разложить можно позже: «Где что лежит» → «📋 Не разложено».";
+  result.innerHTML = '<div class="success-box">Готово: «' + escapeHtml(profile.name) + "» " + where + '</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+    (place ? '<button id="intakeWhere">🗺 Показать на плане</button>' : "") +
+    '<button id="intakeMore" class="btn-ghost">Положить ещё</button><button id="intakeList" class="btn-ghost">🔎 Где что лежит</button></div>';
   result.querySelector("#intakeMore").addEventListener("click", () => showIntake());
-  result.querySelector("#intakeWhere").addEventListener("click", () => { nav.sub = "plan"; showPlan({ focusItemId: added.id }); });
+  result.querySelector("#intakeList").addEventListener("click", () => showWhereThings());
+  result.querySelector("#intakeWhere")?.addEventListener("click", () => { nav.sub = "plan"; showPlan({ focusItemId: saved.id || itemId }); });
+}
+
+/** Разложить вещь «без места» или переложить: подбор по 5S или свой выбор на плане. */
+function showPlaceLater(item) {
+  const profile = item.profile || { name: item.name, category: item.category, usage: item.usage || "monthly", weight: "light", canHang: false, canFold: false, hazardous: false, size: null };
+  const now = item.place ? "Сейчас: " + escapeHtml(item.place.location + " → " + item.place.module + " → " + item.place.shelf) : "Пока не разложена.";
+  showPanel('<h2>' + (item.place ? "↔️ Переложить" : "📦 Разложить") + " «" + escapeHtml(item.name) + '»</h2><p class="muted">' + now + "</p>" +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button id="laterSuggest" class="cook-open">Подобрать место</button>' +
+    '<button id="laterPick" class="btn-ghost">🗺 Выберу сам</button>' +
+    (item.place ? '<button id="laterUnplace" class="btn-ghost">📋 В «Не разложено»</button>' : "") +
+    '<button id="laterBack" class="btn-ghost">← К списку</button></div><div id="laterResult" role="status"></div>');
+  const result = document.querySelector("#laterResult");
+  const suggestBtn = document.querySelector("#laterSuggest");
+  document.querySelector("#laterBack").addEventListener("click", () => showWhereThings());
+  document.querySelector("#laterPick").addEventListener("click", () => pickShelfManually(result, profile, item.id));
+  const unplaceBtn = document.querySelector("#laterUnplace");
+  unplaceBtn?.addEventListener("click", async () => {
+    unplaceBtn.disabled = true;
+    result.textContent = "Сохраняю…";
+    try { await saveIntakeItem(result, profile, null, item.id); } catch (error) { result.textContent = "Не сохранилось: " + error.message; unplaceBtn.disabled = false; }
+  });
+  suggestBtn.addEventListener("click", async () => {
+    suggestBtn.disabled = true;
+    result.textContent = "Ищу лучшее место…";
+    try {
+      const data = await wmsApi("wms.place.suggest", { item: profile });
+      showIntakeSuggestions(result, profile, data.suggestions || [], item.id);
+    } catch (error) { result.textContent = "Не удалось подобрать место: " + error.message; }
+    finally { suggestBtn.disabled = false; }
+  });
 }
 
 /** Ручной выбор: план квартиры прямо в шаге приёмки, нажатие на полку — «Положить сюда». */
-async function pickShelfManually(result, profile) {
+async function pickShelfManually(result, profile, itemId = null) {
   result.innerHTML = '<h3>Куда положить «' + escapeHtml(profile.name) + '»</h3><div id="pickRoot">' + skeleton(2) + '</div><p id="pickStatus" role="status" class="muted"></p>';
   const box = result.querySelector("#pickRoot");
   try {
@@ -1929,7 +1984,7 @@ async function pickShelfManually(result, profile) {
         const status = result.querySelector("#pickStatus");
         if (status) status.textContent = "Сохраняю…";
         try {
-          await saveIntakeItem(result, profile, place);
+          await saveIntakeItem(result, profile, place, itemId);
         } catch (error) {
           saving = false;
           if (status) status.textContent = "Не сохранилось: " + error.message;

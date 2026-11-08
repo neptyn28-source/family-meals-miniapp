@@ -34,6 +34,7 @@ test("вещи идут по порядку комнат, мебели и пол
 test("место вещи собирается из комнаты, мебели и полки; высота — число", () => {
   const [item] = shapeWmsItems([row("Аптечка", ["Прихожая", 0], ["Шкаф-купе — секция 2", 2], ["Полка 6", 5, 191])]);
   assert.deepEqual(item.place, {
+    cellId: null,
     location: "Прихожая",
     module: "Шкаф-купе — секция 2",
     shelf: "Полка 6",
@@ -47,4 +48,13 @@ test("вещь, у которой удалили полку, не теряетс
   const items = shapeWmsItems([row("Без места", null), row("Ключи", ["Прихожая", 0])]);
   assert.deepEqual(items.map((i) => i.name), ["Ключи", "Без места"]);
   assert.equal(items[1].place, null);
+});
+
+test("у вещи есть профиль, чтобы разложить её позже", () => {
+  const r = { ...row("Гладильная доска", null), weight_class: "medium", width_cm: 38, height_cm: 140, depth_cm: 8, can_fold: false, hazardous: false };
+  const [item] = shapeWmsItems([r]);
+  assert.equal(item.place, null);
+  assert.equal(item.profile.weight, "medium");
+  assert.equal(item.profile.canFold, false);
+  assert.equal(JSON.stringify(item.profile.size), JSON.stringify({ width: 38, height: 140, depth: 8 }));
 });

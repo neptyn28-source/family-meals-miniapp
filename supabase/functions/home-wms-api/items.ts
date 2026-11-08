@@ -7,7 +7,16 @@ export type WmsItemRow = {
   category: string | null;
   quantity: number;
   usage_frequency: string | null;
+  cell_id?: string | null;
+  weight_class?: string | null;
+  width_cm?: number | string | null;
+  height_cm?: number | string | null;
+  depth_cm?: number | string | null;
+  can_hang?: boolean | null;
+  can_fold?: boolean | null;
+  hazardous?: boolean | null;
   wms_cells: {
+    id?: string;
     label: string;
     height_from_floor_cm: number | string;
     zone_type: string;
@@ -26,7 +35,19 @@ export type WmsItem = {
   category: string | null;
   quantity: number;
   usage: string | null;
+  /** Профиль для повторного подбора места (разложить «без места» или переложить). */
+  profile: {
+    name: string;
+    category: string | null;
+    usage: string;
+    weight: string;
+    canHang: boolean;
+    canFold: boolean;
+    hazardous: boolean;
+    size: { width: number; height: number; depth: number } | null;
+  };
   place: {
+    cellId: string | null;
     location: string;
     module: string;
     shelf: string;
@@ -36,6 +57,11 @@ export type WmsItem = {
 };
 
 const LAST = Number.MAX_SAFE_INTEGER;
+
+function sizeOf(row: WmsItemRow): WmsItem["profile"]["size"] {
+  const d = [row.width_cm, row.height_cm, row.depth_cm].map((v) => (v == null ? NaN : Number(v)));
+  return d.every((n) => n > 0) ? { width: d[0], height: d[1], depth: d[2] } : null;
+}
 
 function sortKey(row: WmsItemRow): number[] {
   const cell = row.wms_cells;
@@ -64,8 +90,19 @@ export function shapeWmsItems(rows: WmsItemRow[]): WmsItem[] {
         category: row.category,
         quantity: row.quantity,
         usage: row.usage_frequency,
+        profile: {
+          name: row.name,
+          category: row.category,
+          usage: row.usage_frequency || "monthly",
+          weight: row.weight_class || "light",
+          canHang: row.can_hang === true,
+          canFold: row.can_fold === true,
+          hazardous: row.hazardous === true,
+          size: sizeOf(row),
+        },
         place: cell && mod && loc
           ? {
+            cellId: cell.id ?? row.cell_id ?? null,
             location: loc.name,
             module: mod.name,
             shelf: cell.label,
