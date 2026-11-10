@@ -6,13 +6,18 @@ const tg = window.Telegram?.WebApp;
 // Строим его здесь, а не в index.html: Telegram может показать старую страницу из кэша,
 // а этот скрипт загружается заново всегда.
 const BUDGET_URL = "./family-budget/?v=20261108";
-const FITNESS_URL = "./fitness/?v=20261110";
 const TABS = {
   today: { icon: "☀️", label: "Сегодня" },
   menu: { icon: "🍽️", label: "Меню", title: "Меню и покупки" },
   home: { icon: "🥬", label: "Дом", title: "Дом" },
   budget: { icon: "💰", label: "Бюджет", title: "Бюджет" },
   things: { icon: "🔎", label: "Вещи", title: "Вещи" },
+  fitness: { icon: "🏋️", label: "Фитнес", title: "Фитнес-план" },
+};
+// Переключатели вверху вкладки: свой «подэкран» у каждой вкладки (nav[key]).
+const SEGMENTS = {
+  things: { key: "sub", list: [["plan", "🗺 План"], ["find", "🔎 Найти"], ["put", "📥 Положить"]] },
+  fitness: { key: "fsub", list: [["train", "Занятие"], ["progress", "Прогресс"], ["day", "День"], ["guide", "Справка"]] },
 };
 const TAB_ORDER = Object.keys(TABS);
 
@@ -52,34 +57,8 @@ let initData = "";
 let bootstrapData = null;
 let activeWeekStart = getMonday(new Date());
 let editingInventoryId = null;
-let nav = { tab: "today", root: true, sub: "plan" };
+let nav = { tab: "today", root: true, sub: "plan", fsub: "train" };
 let budgetFrame = null;
-let fitnessFrame = null;
-
-// Фитнес-план жены — отдельная страница fitness/ (дневник хранится в браузере телефона), открываем поверх «Дома».
-function showFitness() {
-  stopCookingTimer();
-  placeholder.classList.add("hidden");
-  if (!fitnessFrame) {
-    fitnessFrame = document.createElement("iframe");
-    fitnessFrame.className = "budget-frame";
-    fitnessFrame.title = "Фитнес-план";
-    fitnessFrame.src = FITNESS_URL;
-    document.body.appendChild(fitnessFrame);
-  } else {
-    try { fitnessFrame.contentWindow?.fitnessSync?.(); } catch {}
-  }
-  fitnessFrame.classList.remove("hidden");
-  updateBackButton();
-}
-window.addEventListener("message", (e) => {
-  if (e.origin === location.origin && e.data?.type === "fitness-back") goBack();
-});
-// Страница плана в iframe того же сайта ходит в базу через бота: initData есть только здесь.
-window.DomaFitness = {
-  load: () => api("fitness.get"),
-  save: (state) => api("fitness.save", { state }),
-};
 
 if (tg) {
   tg.ready();
@@ -157,7 +136,6 @@ function goTab(tab, { silent = false } = {}) {
   nav = { ...nav, tab, root: true };
   markTab(tab);
   updateBackButton();
-  fitnessFrame?.classList.add("hidden");
   if (tab === "budget") {
     stopCookingTimer();
     if (!budgetFrame) {
@@ -174,6 +152,36 @@ function goTab(tab, { silent = false } = {}) {
   if (tab === "today") return showToday();
   if (tab === "menu" || tab === "home") return renderHub(tab);
   if (tab === "things") return thingsScreen();
+  if (tab === "fitness") return showFitness();
+}
+
+// Фитнес-план живёт в fitness.js и грузится, как план квартиры, мимо кэша Telegram.
+let fitnessScript = null;
+function loadFitness() {
+  if (window.Fitness) return Promise.resolve();
+  fitnessScript ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "fitness.js?v=" + Date.now();
+    s.onload = () => resolve();
+    s.onerror = () => { fitnessScript = null; reject(new Error("Не загрузился фитнес-план, проверьте интернет")); };
+    document.head.appendChild(s);
+  });
+  return fitnessScript;
+}
+
+async function showFitness() {
+  nav.root = true;
+  showPanel('<div id="fitnessRoot">' + skeleton(3) + "</div>");
+  const box = document.querySelector("#fitnessRoot");
+  try {
+    await loadFitness();
+  } catch (error) {
+    if (box.isConnected) box.innerHTML = "<p>" + escapeHtml(error.message) + '</p><button id="fitnessRetry">Повторить</button>';
+    box.querySelector("#fitnessRetry")?.addEventListener("click", showFitness);
+    return;
+  }
+  if (!box.isConnected) return;
+  window.Fitness.mount(box, { api, esc: escapeHtml, haptic, notify, confirm: askConfirm }, nav.fsub);
 }
 
 function thingsScreen(opts) {
@@ -200,10 +208,11 @@ function goBack() {
 }
 
 function panelChrome() {
-  if (nav.tab === "things") {
-    const segs = [["plan", "🗺 План"], ["find", "🔎 Найти"], ["put", "📥 Положить"]];
-    const at = Math.max(0, segs.findIndex(([id]) => id === nav.sub));
-    return `<div class="segmented three s${at}" role="tablist"><span class="seg-pill" aria-hidden="true"></span>` +
+  const seg = SEGMENTS[nav.tab];
+  if (seg) {
+    const segs = seg.list;
+    const at = Math.max(0, segs.findIndex(([id]) => id === nav[seg.key]));
+    return `<div class="segmented ${segs.length === 4 ? "four" : "three"} s${at}" role="tablist"><span class="seg-pill" aria-hidden="true"></span>` +
       segs.map(([id, label], i) => `<button data-seg="${id}" class="${i === at ? "on" : ""}" role="tab" aria-selected="${i === at}">${label}</button>`).join("") +
       "</div>";
   }
@@ -216,11 +225,12 @@ function panelChrome() {
 function bindPanelChrome() {
   placeholder.querySelector("[data-back]")?.addEventListener("click", goBack);
   placeholder.querySelectorAll("[data-seg]").forEach((b) => b.addEventListener("click", () => {
-    if (b.dataset.seg === nav.sub) return;
+    const seg = SEGMENTS[nav.tab];
+    if (!seg || b.dataset.seg === nav[seg.key]) return;
     haptic();
     nav.root = true;
-    nav.sub = b.dataset.seg;
-    thingsScreen();
+    nav[seg.key] = b.dataset.seg;
+    if (nav.tab === "fitness") showFitness(); else thingsScreen();
   }));
 }
 
@@ -285,9 +295,6 @@ function renderHub(tab) {
       { icon: "🥬", title: "Остатки", text: "Что реально есть дома", run: showInventory },
       { icon: "❤️", title: "Правила семьи", text: "Аллергии, запреты, предпочтения", run: showRules },
       { icon: "🎯", title: "Вес и цели", text: "Муж, жена, ребёнок и бюджет на еду", run: showProfile },
-    ]],
-    ["Здоровье", [
-      { icon: "🏋️‍♀️", title: "Фитнес-план", text: "Тренировки DDX, техника и дневник прогресса", run: showFitness },
     ]],
     ...(bootstrapData?.member?.role === "husband" ? [["Семья", [
       { icon: "💌", title: "Пригласить жену", text: "Код, чтобы подключиться к семье", run: showInvite },

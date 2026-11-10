@@ -78,7 +78,7 @@ li{margin:2px 0}
   position:fixed;z-index:20;left:50%;transform:translateX(-50%);
   bottom:calc(10px + var(--safe-b));
   width:min(calc(100% - 20px),560px);height:var(--tabbar-h);
-  display:grid;grid-template-columns:repeat(5,1fr);align-items:center;
+  display:grid;grid-template-columns:repeat(6,1fr);align-items:center;
   padding:6px;border-radius:24px;
   background:rgba(16,30,25,.78);
   border:1px solid var(--stroke);
@@ -98,7 +98,7 @@ li{margin:2px 0}
 .tab:active i{transform:scale(.88)}
 .tab-pill{
   position:absolute;z-index:0;top:6px;bottom:6px;left:6px;
-  width:calc((100% - 12px) / 5);border-radius:18px;
+  width:calc((100% - 12px) / 6);border-radius:18px;
   background:linear-gradient(135deg,var(--accent),#7be3bb);
   box-shadow:0 6px 18px rgba(63,209,155,.35);
   transition:transform .45s var(--spring);
@@ -312,6 +312,47 @@ details[open]>*:not(summary){animation:fadeUp .3s var(--ease) both}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}
 }
+
+/* ---------- Фитнес (fitness.js) ---------- */
+.segmented.four{grid-template-columns:repeat(4,1fr)}
+.segmented.four button{padding:10px 2px;font-size:13px}
+.segmented.four .seg-pill{width:calc(25% - 2px)}
+.segmented.four.s1 .seg-pill{transform:translateX(100%)}
+.segmented.four.s2 .seg-pill{transform:translateX(200%)}
+.segmented.four.s3 .seg-pill{transform:translateX(300%)}
+.fx-hero{position:relative;overflow:hidden;background:radial-gradient(120% 90% at 100% 0%,rgba(63,209,155,.18),transparent 60%),var(--card)}
+.fx-hero p{margin:10px 0 0;font-size:14px;line-height:1.45}
+.fx-eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.fx-week{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
+.fx-week b{font-size:20px}
+.fx-week button{width:40px;height:40px;padding:0;font-size:20px;border-radius:12px}
+.fx-days{display:grid;grid-template-columns:repeat(3,1fr);margin:14px 0 0}
+.fx-prog{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px}
+.fx-prog span{color:var(--hint);font-weight:700}
+.fx-ex{padding:16px;margin:10px 0;border-radius:var(--radius);background:var(--card);border:1px solid var(--stroke);transition:border-color .3s,background .3s}
+.fx-ex.done{border-color:rgba(63,209,155,.35);background:linear-gradient(135deg,rgba(63,209,155,.09),var(--card))}
+.fx-ex-head{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;color:var(--text);font-size:16px;cursor:pointer}
+.fx-ex-head input[type=checkbox]{width:24px;height:24px}
+.fx-num{min-width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:var(--accent-soft);color:var(--accent);font-weight:800;font-size:13px}
+.fx-ex.done .fx-ex-head b{text-decoration:line-through;opacity:.7}
+.fx-tags{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+.fx-tags span{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;background:var(--card-strong);color:var(--hint)}
+.fx-ex .feedback-grid{grid-template-columns:1fr 1fr;gap:10px}
+.fx-ex details{margin-top:12px}
+.fx-field{display:grid;gap:6px;margin-top:10px}
+.fx-inst{font-size:14px;line-height:1.5;padding-top:8px}
+.fx-inst p{margin:2px 0 10px;color:var(--text)}
+.fx-wide{width:100%;margin-top:12px}
+.fx-sync{font-size:12px;margin:10px 0 0;min-height:16px}
+.fx-row{display:grid;gap:3px;padding:12px 14px;margin:8px 0;border-radius:16px;background:var(--card);border:1px solid var(--stroke);font-size:14px}
+.fx-row small{color:var(--hint)}
+.fx-text ul,.fx-text ol{margin:0;padding-left:20px;line-height:1.55;font-size:14px}
+.fx-text p{font-size:14px;line-height:1.55;margin:0 0 8px}
+.fx-text h3:not(:first-child){margin-top:18px}
+.fx-path{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px}
+.fx-path div{display:grid;gap:3px;padding:12px;border-radius:14px;background:var(--card-strong);border:1px solid var(--stroke);font-size:13px}
+.fx-path b{font-size:18px;color:var(--accent)}
+.fx-foot{text-align:center;font-size:12px;margin:18px 0 0}
 
 /* ---------- Вещи: план квартиры (wms-plan.js) ---------- */
 .segmented.three{grid-template-columns:repeat(3,1fr)}
