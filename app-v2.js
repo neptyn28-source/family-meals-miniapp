@@ -66,6 +66,8 @@ function showFitness() {
     fitnessFrame.title = "Фитнес-план";
     fitnessFrame.src = FITNESS_URL;
     document.body.appendChild(fitnessFrame);
+  } else {
+    try { fitnessFrame.contentWindow?.fitnessSync?.(); } catch {}
   }
   fitnessFrame.classList.remove("hidden");
   updateBackButton();
@@ -73,6 +75,11 @@ function showFitness() {
 window.addEventListener("message", (e) => {
   if (e.origin === location.origin && e.data?.type === "fitness-back") goBack();
 });
+// Страница плана в iframe того же сайта ходит в базу через бота: initData есть только здесь.
+window.DomaFitness = {
+  load: () => api("fitness.get"),
+  save: (state) => api("fitness.save", { state }),
+};
 
 if (tg) {
   tg.ready();

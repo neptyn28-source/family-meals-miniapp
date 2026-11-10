@@ -12,6 +12,38 @@ const WEEK_STATUSES = new Set(["draft", "approved", "archived"]);
 const RULE_TYPES = new Set(["hard", "preference", "feedback"]);
 const STATES = new Set(["raw", "cooked", "semi_finished", "frozen", "dry", "canned"]);
 
+// Дневник фитнеса: журналы (тренировки, замеры, дни) объединяем по id, чтобы запись с одного телефона
+// не стёрла запись с другого; отметки текущих тренировок и начало цикла берём из последнего сохранения.
+type Json = Record<string, unknown>;
+const FITNESS_LISTS = ["sessions", "measures", "daily"] as const;
+function mergeFitness(prev: Json, incoming: Json): Json {
+  const obj = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? v as Json : {});
+  // Начало цикла меняют только кнопки «неделя −/+» (start_set), иначе остаётся первое сохранённое.
+  const start = Number(incoming.start);
+  const validStart = Number.isFinite(start) && start > 0 ? start : null;
+  const next: Json = {
+    checks: obj(incoming.checks),
+    logs: obj(incoming.logs),
+    start: (incoming.start_set === true ? validStart : null) ?? prev.start ?? validStart,
+  };
+  for (const name of FITNESS_LISTS) {
+    const byKey = new Map<string, Json>();
+    for (const list of [prev[name], incoming[name]]) {
+      if (!Array.isArray(list)) continue;
+      for (const e of list) {
+        if (!e || typeof e !== "object") continue;
+        const entry = e as Json;
+        const key = entry.id ? String(entry.id) : JSON.stringify(entry);
+        byKey.set(key, entry);
+      }
+    }
+    next[name] = [...byKey.values()]
+      .sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0))
+      .slice(0, 2000);
+  }
+  return next;
+}
+
 function reply(body: unknown, status = 200) {
   return Response.json(body, { status, headers: CORS });
 }
@@ -690,6 +722,31 @@ async function main(req: Request) {
       }, { onConflict: "meal_id,member_id" }).select("*").single();
       if (r.error) throw r.error;
       return reply({ ok: true, feedback: r.data });
+    }
+
+    if (action === "fitness.get") {
+      const r = await db.from("fitness_journal").select("state,updated_at").eq("family_id", familyId).maybeSingle();
+      if (r.error) throw r.error;
+      return reply({ ok: true, state: r.data?.state ?? null, updated_at: r.data?.updated_at ?? null });
+    }
+
+    if (action === "fitness.save") {
+      const incoming = payload.state && typeof payload.state === "object" && !Array.isArray(payload.state) ? payload.state : null;
+      if (!incoming) return reply({ ok: false, error: "bad_state", message: "Нет данных дневника" }, 400);
+      if (JSON.stringify(incoming).length > 500_000) {
+        return reply({ ok: false, error: "too_large", message: "Дневник слишком большой" }, 413);
+      }
+      const current = await db.from("fitness_journal").select("state").eq("family_id", familyId).maybeSingle();
+      if (current.error) throw current.error;
+      const next = mergeFitness(current.data?.state ?? {}, incoming);
+      const saved = await db.from("fitness_journal").upsert({
+        family_id: familyId,
+        state: next,
+        updated_at: new Date().toISOString(),
+        updated_by: auth.user.id,
+      }, { onConflict: "family_id" }).select("state,updated_at").single();
+      if (saved.error) throw saved.error;
+      return reply({ ok: true, state: saved.data.state, updated_at: saved.data.updated_at });
     }
 
     return reply({ ok: false, error: "Unknown action" }, 400);
