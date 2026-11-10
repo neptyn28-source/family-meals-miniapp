@@ -6,6 +6,7 @@ const tg = window.Telegram?.WebApp;
 // Строим его здесь, а не в index.html: Telegram может показать старую страницу из кэша,
 // а этот скрипт загружается заново всегда.
 const BUDGET_URL = "./family-budget/?v=20261108";
+const FITNESS_URL = "./fitness/?v=20261110";
 const TABS = {
   today: { icon: "☀️", label: "Сегодня" },
   menu: { icon: "🍽️", label: "Меню", title: "Меню и покупки" },
@@ -53,6 +54,25 @@ let activeWeekStart = getMonday(new Date());
 let editingInventoryId = null;
 let nav = { tab: "today", root: true, sub: "plan" };
 let budgetFrame = null;
+let fitnessFrame = null;
+
+// Фитнес-план жены — отдельная страница fitness/ (дневник хранится в браузере телефона), открываем поверх «Дома».
+function showFitness() {
+  stopCookingTimer();
+  placeholder.classList.add("hidden");
+  if (!fitnessFrame) {
+    fitnessFrame = document.createElement("iframe");
+    fitnessFrame.className = "budget-frame";
+    fitnessFrame.title = "Фитнес-план";
+    fitnessFrame.src = FITNESS_URL;
+    document.body.appendChild(fitnessFrame);
+  }
+  fitnessFrame.classList.remove("hidden");
+  updateBackButton();
+}
+window.addEventListener("message", (e) => {
+  if (e.origin === location.origin && e.data?.type === "fitness-back") goBack();
+});
 
 if (tg) {
   tg.ready();
@@ -130,6 +150,7 @@ function goTab(tab, { silent = false } = {}) {
   nav = { ...nav, tab, root: true };
   markTab(tab);
   updateBackButton();
+  fitnessFrame?.classList.add("hidden");
   if (tab === "budget") {
     stopCookingTimer();
     if (!budgetFrame) {
@@ -257,6 +278,9 @@ function renderHub(tab) {
       { icon: "🥬", title: "Остатки", text: "Что реально есть дома", run: showInventory },
       { icon: "❤️", title: "Правила семьи", text: "Аллергии, запреты, предпочтения", run: showRules },
       { icon: "🎯", title: "Вес и цели", text: "Муж, жена, ребёнок и бюджет на еду", run: showProfile },
+    ]],
+    ["Здоровье", [
+      { icon: "🏋️‍♀️", title: "Фитнес-план", text: "Тренировки DDX, техника и дневник прогресса", run: showFitness },
     ]],
     ...(bootstrapData?.member?.role === "husband" ? [["Семья", [
       { icon: "💌", title: "Пригласить жену", text: "Код, чтобы подключиться к семье", run: showInvite },
