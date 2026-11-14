@@ -79,22 +79,61 @@
   const codeOf = (it) => (String(it.model).match(/\(([A-Z]+\d*-[A-Z]+\d+)/) || [])[1] || it.name;
   // Стартовый вес: у жены одно число, у мужа — план по подходам (берём первый рабочий).
   const startKg = (it) => it.start_kg ?? (it.plan_kg || []).find((x) => x.set !== "разминка")?.kg ?? "";
-  const planLine = (it) => (it.plan_kg || []).map((x) => (x.set === "разминка" ? "разминка " : "") + (x.kg ? String(x.kg).replace(".", ",") + " кг" : "свой вес") + " × " + x.reps).join(" → ");
+  // План по подходам с поправкой delta (прогрессия) — только для рабочих подходов с весом.
+  const planLine = (it, delta = 0) => (it.plan_kg || []).map((x) => {
+    const w = x.kg && x.set !== "разминка" ? round(Math.max(0, x.kg + delta)) : x.kg;
+    return (x.set === "разминка" ? "разминка " : "") + (w ? fmt(w) + " кг" : "свой вес") + " × " + x.reps;
+  }).join(" → ");
+
+  // ---------- прогрессия весов ----------
+  const round = (x) => Math.round(x * 10) / 10;
+  const fmt = (x) => String(round(x)).replace(".", ",");
+  const num = (v) => { const m = String(v ?? "").replace(",", ".").match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
+  // Шаг прибавки: из программы (step_kg; у гравитрона отрицательный — помощь уменьшается), иначе по стартовому весу.
+  const stepOf = (it) => {
+    if (it.step_kg != null) return Number(it.step_kg);
+    const s = Number(startKg(it)) || 0;
+    return s <= 0 ? 0 : s <= 10 ? 1.1 : s <= 30 ? 2.3 : 4.5;
+  };
+  const topReps = (it) => { const m = String(it.reps).match(/(\d+)\s*[–-]\s*(\d+)/); return m ? Number(m[2]) : num(it.reps); };
+  // Без записей в дневнике: недели 1–2 — старт, дальше +1 шаг каждые 2 недели (3–4 → 1, 5–6 → 2 … 11–12 → 5).
+  const stepsByWeek = (w) => (w <= 2 ? 0 : Math.min(5, Math.floor((w - 1) / 2)));
+  function lastLog(d, code) {
+    for (const s of S.sessions) {
+      if (s.day !== d || s.prog !== PROG()) continue;
+      const l = s.logs?.[code];
+      if (l && num(l.w) != null) return { w: num(l.w), r: l.r, date: s.date };
+    }
+    return null;
+  }
+  // Вес на сегодня: по прошлой записи (двойная прогрессия), а пока записей нет — по неделе цикла.
+  function target(it, d) {
+    const step = stepOf(it), start = Number(startKg(it)) || 0, tired = tiredToday();
+    const clamp = (x) => round(Math.min(it.max_kg ?? Infinity, Math.max(0, x)));
+    const sign = step < 0 ? "−" : "+";
+    if (!start) return { kg: 0, delta: 0, why: "" };
+    const res = (kg, why) => ({ kg, delta: round(kg - start), why: why + (step < 0 ? " Здесь вес — противовес-помощь: меньше вес — тяжелее тебе." : "") });
+    const last = lastLog(d, codeOf(it));
+    if (last) {
+      const reps = String(last.r || "").match(/\d+/g)?.map(Number) || [], top = topReps(it);
+      const up = !tired && step !== 0 && reps.length > 0 && !!top && reps.every((n) => n >= top);
+      const kg = clamp(up ? last.w + step : last.w);
+      const why = up ? `${last.date}: ${fmt(last.w)} кг, верх повторов взят — ${sign}${fmt(Math.abs(step))} кг.`
+        : `${last.date}: ${fmt(last.w)} кг. Прибавка, когда во всех подходах будет ${top || "верх"} повторов${tired ? " (сегодня без прибавки — сон или усталость)" : ""}.`;
+      return res(kg, why);
+    }
+    const k = stepsByWeek(tired ? week() - 1 : week());
+    const kg = clamp(start + step * k);
+    const why = k ? `План недели ${week()}: старт ${fmt(start)} кг ${sign} ${k} × ${fmt(Math.abs(step))} кг.${tired ? " Сегодня без прибавки — сон или усталость." : ""} Получилось тяжело — оставь прошлый вес и запиши, что вышло.`
+      : `Недели 1–2 — осваиваем технику на стартовом весе. Запиши вес и повторы — дальше бот подскажет прибавку.`;
+    return res(kg, why);
+  }
   const items = (d) => P?.days?.[d]?.items || [];
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const today = () => new Date().toLocaleDateString("ru-RU");
   const esc = (v) => ctx.esc(v);
   const kg = (n) => String(n).replace(".", ",") + " кг";
 
-  // Последний записанный вес этого упражнения — подсказка в поле «Вес».
-  function lastWeight(d, code) {
-    for (const s of S.sessions) {
-      if (s.day !== d || s.prog !== PROG()) continue;
-      const w = s.logs?.[code]?.w;
-      if (w) return w;
-    }
-    return "";
-  }
   // Сегодня отмечен плохой сон или усталость — напоминание не повышать веса.
   function tiredToday() {
     const x = S.daily.find((e) => e.date === today());
@@ -191,15 +230,16 @@
 
   function exerciseHtml(it, i, ph, c, logs) {
     const code = codeOf(it), l = logs[code] || {}, sets = it.sets?.[phaseKey(ph)] || "2";
-    const last = lastWeight(day, code);
+    const t = target(it, day);
     return `<article class="fx-ex${c[code] ? " done" : ""}">
       <label class="fx-ex-head"><span class="fx-num">${i + 1}</span><b>${esc(it.name)}</b><input type="checkbox" data-check="${esc(code)}" ${c[code] ? "checked" : ""} aria-label="Сделано"></label>
-      <div class="fx-tags"><span>${esc(sets)} ${plural(sets)}</span><span>${esc(it.reps)}</span><span>Отдых ${esc(it.rest)}</span><span class="fx-kg">Старт ${esc(kg(startKg(it)))}</span></div>
-      ${it.plan_kg ? `<p class="fx-plan">${esc(planLine(it))}</p>` : ""}
+      <div class="fx-tags"><span>${esc(sets)} ${plural(sets)}</span><span>${esc(it.reps)}</span><span>Отдых ${esc(it.rest)}</span><span class="fx-kg">${t.kg ? "Сегодня " + esc(kg(t.kg)) : "Свой вес"}</span></div>
+      ${it.plan_kg ? `<p class="fx-plan">${esc(planLine(it, t.delta))}</p>` : ""}
+      ${t.why ? `<p class="fx-why">${esc(t.why)}</p>` : ""}
       ${photo(it)}
       ${muscles(it)}
       <div class="feedback-grid">
-        ${field("Вес, кг", `<input data-log="${esc(code)}" data-f="w" value="${esc(l.w || "")}" inputmode="decimal" placeholder="${esc(last ? "Было " + last : String(startKg(it)).replace(".", ","))}">`)}
+        ${field("Вес, кг", `<input data-log="${esc(code)}" data-f="w" value="${esc(l.w || "")}" inputmode="decimal" placeholder="${esc(t.kg ? fmt(t.kg) : "")}">`)}
         ${field("Повторы", `<input data-log="${esc(code)}" data-f="r" value="${esc(l.r || "")}" placeholder="${esc(it.reps)}">`)}
       </div>
       <details><summary>Настройка и техника</summary><div class="fx-inst">

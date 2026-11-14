@@ -514,3 +514,4 @@ details[open]>*:not(summary){animation:fadeUp .3s var(--ease) both}
 .wp-fill i.full{background:var(--danger)}
 .fx-who{display:grid;grid-template-columns:1fr 1fr;margin:0 0 12px}
 .fx-plan{margin:8px 0 0;font-size:13px;font-weight:700;color:var(--accent);line-height:1.45}
+.fx-why{margin:6px 0 0;font-size:12px;color:var(--hint);line-height:1.45}
