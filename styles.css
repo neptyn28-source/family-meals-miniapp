@@ -353,6 +353,19 @@ details[open]>*:not(summary){animation:fadeUp .3s var(--ease) both}
 .fx-path div{display:grid;gap:3px;padding:12px;border-radius:14px;background:var(--card-strong);border:1px solid var(--stroke);font-size:13px}
 .fx-path b{font-size:18px;color:var(--accent)}
 .fx-foot{text-align:center;font-size:12px;margin:18px 0 0}
+.fx-photo{margin:12px 0 0;border-radius:14px;background:#fff;overflow:hidden;border:1px solid var(--stroke)}
+.fx-photo img{display:block;width:100%;max-width:220px;aspect-ratio:1;object-fit:contain;margin:0 auto}
+.fx-photo figcaption{font-size:11px;color:#5b6470;text-align:center;padding:4px 8px 8px}
+.fx-muscles{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.fx-m{font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px}
+.fx-m.main{background:var(--accent-soft);color:var(--accent)}
+.fx-m.sec{background:var(--card-strong);color:var(--hint)}
+.fx-tags .fx-kg{color:var(--accent)}
+.fx-before,.fx-after{margin:10px 0}
+.fx-before p,.fx-after p{margin:8px 0 0}
+.fx-after details+details{margin-top:10px}
+.fx-note{font-size:13px;line-height:1.45;margin:10px 0 0}
+.fx-tired{margin:12px 0 0;font-size:14px}
 
 /* ---------- Вещи: план квартиры (wms-plan.js) ---------- */
 .segmented.three{grid-template-columns:repeat(3,1fr)}

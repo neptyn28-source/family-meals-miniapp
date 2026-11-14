@@ -1,61 +1,49 @@
-// Вкладка «Фитнес»: стартовый 12-недельный план жены в DDX — занятия A/B/C, дневник, справка.
-// Подключается из app-v2.js; данные — family-api (fitness.get / fitness.save), общие для всей семьи.
+// Вкладка «Фитнес»: 12-недельный сплит жены в DDX (А — ноги и ягодицы, Б — спина, В — грудь и плечи).
+// Программа — данные в fitness-wife.json, фото тренажёров — fitness-img/<модель>.webp (копии с сайта Matrix).
+// Подключается из app-v2.js; дневник — family-api (fitness.get / fitness.save), общий для всей семьи.
 (function () {
   "use strict";
 
-  // [название, подходы, повторы, отдых, мышцы, как выполнять, контроль, если тренажёра нет]
-  const EX = {
-    A: [
-      ["Жим ногами", "2–3", "10–12", "90–120 сек", "Ноги и ягодицы", "Сядь, прижми спину и таз к спинке. Стопы на ширине плеч, вся стопа на платформе. Опускай платформу до комфортной глубины, пока таз не отрывается. Выжимай без резкого выпрямления коленей.", "Колени направлены туда же, куда носки. Не подкручивай таз и не отрывай пятки.", "Если не знаешь, как снять фиксатор, попроси сотрудника показать."],
-      ["Ягодичный мост в тренажёре", "2–3", "10–12", "90–120 сек", "Ягодицы", "Валик на области таза. Подними таз до положения, где корпус и бёдра почти на одной линии. Сожми ягодицы и медленно опусти.", "Не прогибай поясницу и не поднимай таз за счёт спины.", "Если тренажёра нет — мост на полу без веса."],
-      ["Сгибание ног сидя", "2", "12–15", "60–90 сек", "Задняя поверхность бедра", "Настрой валик на нижнюю часть голени, зафиксируй бёдра. Согни ноги и плавно вернись.", "Таз остаётся на сиденье. Не бросай вес.", "Можно использовать тренажёр для сгибания ног лёжа."],
-      ["Отведение бёдер", "2", "15–20", "60 сек", "Средняя ягодичная", "Сядь глубоко, спина на опоре. Медленно разведи колени, затем верни обратно.", "Не раскачивай корпус и не раскрывай ноги через боль.", "Отведение ноги в сторону в блоке — только после показа настройки."],
-      ["Тяга верхнего блока", "2–3", "10–12", "75–90 сек", "Спина", "Зафиксируй бёдра. Потяни рукоять к верхней части груди, локти направляй вниз. Медленно выпрями руки.", "Не тяни за голову и не раскачивай корпус.", "Попроси показать настройку фиксаторов."],
-      ["Жим от груди", "2", "10–12", "75–90 сек", "Грудь и руки", "Настрой сиденье так, чтобы рукояти были на уровне середины груди. Выжми вперёд и плавно верни.", "Не поднимай плечи к ушам и не блокируй локти.", "Если плечу неприятно — остановись."],
-    ],
-    B: [
-      ["Разгибание ног", "2", "12–15", "60–75 сек", "Передняя поверхность бедра", "Ось тренажёра примерно на уровне колена. Разогни ноги плавно и медленно опусти валик.", "Без рывка и чрезмерного веса.", "Можно заменить лёгким жимом ногами."],
-      ["Сгибание ног", "2–3", "10–12", "75–90 сек", "Задняя поверхность бедра", "Зафиксируй бёдра, согни ноги против сопротивления и плавно верни.", "Таз не отрывается от опоры.", "Другой тренажёр для сгибания ног."],
-      ["Горизонтальная тяга", "2–3", "10–12", "75–90 сек", "Средняя часть спины", "Сядь устойчиво. Потяни рукоять к нижним рёбрам, локти веди назад. Медленно выпрями руки.", "Не раскачивайся и не округляй поясницу.", "Тяга с упором грудью."],
-      ["Жим от груди", "2", "10–12", "75–90 сек", "Грудные мышцы", "Спина прижата, стопы на полу. Выжми рукояти вперёд и верни контролируемо.", "При боли в плече прекрати упражнение.", "Другой грудной тренажёр с комфортной траекторией."],
-      ["Отведение ноги назад", "2", "12–15 на ногу", "60 сек", "Ягодицы", "С манжетой нижнего блока держись за опору и отведи ногу назад на небольшую амплитуду.", "Таз вперёд, не прогибай поясницу.", "Только если сотрудник показал настройку манжеты."],
-      ["Жим Паллофа (удержание корпуса от поворота)", "2", "8–10 на сторону", "45–60 сек", "Корпус", "Встань боком к блоку. Рукоять у груди. Выпрями руки, не позволяя корпусу повернуться. Верни и поменяй сторону.", "Не вращай таз и не задерживай дыхание.", "Если не уверена в блоке, пропусти и уточни технику."],
-      ["«Мёртвый жук» — пресс лёжа", "2", "6–8 на сторону", "45 сек", "Пресс и контроль корпуса", "Лёжа на спине, подними согнутые ноги и руки. Медленно опусти противоположные руку и ногу, сохраняя поясницу стабильной.", "Сократи амплитуду, если поясница прогибается.", "Скольжение пяткой по полу."],
-    ],
-    C: [
-      ["Жим ногами", "2", "12", "90 сек", "Ноги и ягодицы", "Поставь стопы на ширине плеч. Опусти платформу комфортно и плавно выжми.", "Умеренный вес, не проверяй рекорды.", "Попроси показать тренажёр для ног."],
-      ["Ягодичный мост в тренажёре", "2–3", "10–12", "90–120 сек", "Ягодицы", "Подними таз за счёт ягодиц, задержись на секунду и плавно опустись.", "Без переразгибания поясницы.", "Мост на полу."],
-      ["Отведение бёдер", "2", "15–20", "60 сек", "Средняя ягодичная", "Разводи колени с контролем и возвращай обратно.", "Без раскачивания.", "Отведение ноги с манжетой после инструктажа."],
-      ["Тяга верхнего блока", "2–3", "10–12", "75–90 сек", "Спина и подготовка к пилону", "Потяни рукоять к груди, веди локти вниз, верни руки плавно.", "Не тяни за голову и не дёргай вес.", "Нейтральный хват на верхнем блоке."],
-      ["Тяга каната к лицу", "2", "12–15", "60 сек", "Плечи и лопатки", "Канат на высоте лица. Потяни к лицу, разводя кисти в стороны. Верни медленно.", "Лёгкий вес, плечи не поднимай к ушам.", "Обратная бабочка с лёгким весом после настройки."],
-      ["Удержание гантелей", "2", "15–20 сек", "60 сек", "Хват и предплечья", "Возьми лёгкие гантели, руки вдоль тела. Стой ровно, затем поставь их на место.", "Не задерживай дыхание. Не продолжай при боли или онемении.", "Удержание устойчивых рукоятей."],
-      ["Боковая планка с колен", "2", "15–25 сек на сторону", "45 сек", "Боковые мышцы корпуса", "Локоть под плечом, колени согнуты. Подними таз и удерживай, спокойно дыша.", "Не проваливайся в плечо.", "Боковое удержание у стены."],
-    ],
+  const PROGRAM_URL = "fitness-wife.json";
+  const PROG_ID = "wife-split-1";
+  // Названия упражнений старой программы — чтобы старые записи журнала читались правильно.
+  const OLD_NAMES = {
+    A: ["Жим ногами", "Ягодичный мост в тренажёре", "Сгибание ног сидя", "Отведение бёдер", "Тяга верхнего блока", "Жим от груди"],
+    B: ["Разгибание ног", "Сгибание ног", "Горизонтальная тяга", "Жим от груди", "Отведение ноги назад", "Жим Паллофа", "«Мёртвый жук»"],
+    C: ["Жим ногами", "Ягодичный мост в тренажёре", "Отведение бёдер", "Тяга верхнего блока", "Тяга каната к лицу", "Удержание гантелей", "Боковая планка с колен"],
   };
-  const DAYS = {
-    A: { chip: "ПН · А", letter: "А", title: "Ягодицы, ноги и спина" },
-    B: { chip: "СР · Б", letter: "Б", title: "Всё тело и корпус" },
-    C: { chip: "ПТ · В", letter: "В", title: "Ягодицы, верх тела и хват" },
+  const LETTER = { A: "А", B: "Б", C: "В" };
+  const MUSCLE = {
+    chest_upper: "верх груди", chest_mid: "середина груди", delt_front: "передняя дельта", delt_mid: "средняя дельта",
+    delt_rear: "задняя дельта", triceps: "трицепс", biceps: "бицепс", forearms: "предплечья и хват", lats: "широчайшие",
+    traps_mid: "середина трапеции", traps_upper: "верх трапеции", rhomboids: "ромбовидные", lower_back: "поясница",
+    abs: "пресс", obliques: "косые мышцы живота", glute_max: "большая ягодичная", glute_med: "средняя ягодичная",
+    adductors: "приводящие", quads: "квадрицепс", hamstrings: "бицепс бедра", calves: "икры",
   };
-  const PHASES = [
-    null,
-    { weeks: "Недели 1–2", hint: "Осваиваем технику. Два рабочих подхода, лёгкий вес, 3–4 повтора в запасе." },
-    { weeks: "Недели 3–4", hint: "Закрепляем движения. Третий подход — только если хорошо восстанавливаешься." },
-    { weeks: "Недели 5–8", hint: "Постепенно увеличиваем вес при стабильной технике." },
-    { weeks: "Недели 9–12", hint: "Закрепляем прогресс. Не тестируем максимальные веса." },
-  ];
+  const PHASE_KEYS = ["w1_2", "w3_4", "w5_8", "w9_11", "w12"];
   const MOODS = ["Комфортно", "Было тяжело, но техника сохранялась", "Сильно устала", "Была боль или необычные симптомы"];
   const SLEEP = ["Менее 6 часов", "6–7 часов", "7–8 часов", "Более 8 часов"];
   const ENERGY = ["Хорошее", "Обычное", "Устала", "Плохое"];
   const WEEK_MS = 7 * 24 * 3600 * 1000;
   const CACHE = "doma_fitness_cache";
   const DIRTY = "doma_fitness_dirty";
+  const PCACHE = "doma_fitness_program";
 
   // ---------- состояние ----------
+  // В checks/logs старой программы ключи — номера упражнений; у новой — код тренажёра. Номера отбрасываем.
+  const byCode = (o) => {
+    const out = {};
+    for (const [d, v] of Object.entries(o && typeof o === "object" ? o : {})) {
+      if (!v || typeof v !== "object") continue;
+      const kept = Object.fromEntries(Object.entries(v).filter(([k]) => !/^\d+$/.test(k)));
+      if (Object.keys(kept).length) out[d] = kept;
+    }
+    return out;
+  };
   const norm = (d) => {
     d = d && typeof d === "object" ? d : {};
     return {
-      checks: d.checks || {}, logs: d.logs || {},
+      checks: byCode(d.checks), logs: byCode(d.logs),
       sessions: Array.isArray(d.sessions) ? d.sessions : [],
       measures: Array.isArray(d.measures) ? d.measures : [],
       daily: Array.isArray(d.daily) ? d.daily : [],
@@ -67,15 +55,46 @@
     set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
   };
   let S = (() => { try { return norm(JSON.parse(store.get(CACHE))); } catch { return norm(); } })();
+  let P = (() => { try { return JSON.parse(store.get(PCACHE)) || null; } catch { return null; } })();
   let ctx = null, box = null, sub = "train";
   let day = ({ 1: "A", 2: "B", 3: "B", 4: "C", 5: "C" })[new Date().getDay()] || "A";
   let timer = 0, busy = false, again = false, moved = false, syncText = "";
 
   const week = () => Math.min(12, Math.max(1, Math.floor((Date.now() - (S.start || Date.now())) / WEEK_MS) + 1));
-  const phaseOf = (w) => (w <= 2 ? 1 : w <= 4 ? 2 : w <= 8 ? 3 : 4);
+  const phaseOf = (w) => (w <= 2 ? 0 : w <= 4 ? 1 : w <= 8 ? 2 : w <= 11 ? 3 : 4);
+  const codeOf = (it) => (String(it.model).match(/\((G\d+-S\d+)\)/) || [])[1] || it.name;
+  const items = (d) => P?.days?.[d]?.items || [];
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const today = () => new Date().toLocaleDateString("ru-RU");
   const esc = (v) => ctx.esc(v);
+  const kg = (n) => String(n).replace(".", ",") + " кг";
+
+  // Последний записанный вес этого упражнения — подсказка в поле «Вес».
+  function lastWeight(d, code) {
+    for (const s of S.sessions) {
+      if (s.day !== d || s.prog !== PROG_ID) continue;
+      const w = s.logs?.[code]?.w;
+      if (w) return w;
+    }
+    return "";
+  }
+  // Сегодня отмечен плохой сон или усталость — напоминание не повышать веса.
+  function tiredToday() {
+    const x = S.daily.find((e) => e.date === today());
+    return !!x && (x.sleep === SLEEP[0] || x.energy === ENERGY[2] || x.energy === ENERGY[3]);
+  }
+
+  // ---------- программа ----------
+  async function loadProgram() {
+    try {
+      const r = await fetch(PROGRAM_URL + "?v=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      P = await r.json();
+      store.set(PCACHE, JSON.stringify(P));
+    } catch (e) {
+      if (!P) throw new Error("Не загрузилась программа тренировок, проверьте интернет");
+    }
+  }
 
   // ---------- синхронизация с базой ----------
   function setSync(text) {
@@ -136,40 +155,72 @@
   const field = (label, html) => `<label class="fx-field">${label}${html}</label>`;
   const options = (list, sel) => list.map((x) => `<option${x === sel ? " selected" : ""}>${esc(x)}</option>`).join("");
   const syncLine = () => `<p class="muted fx-sync">${esc(syncText)}</p>`;
+  const para = (title, text) => (text ? `<b>${esc(title)}</b><p>${esc(text)}</p>` : "");
+  const plural = (n) => (/(^|[^1])1$/.test(n) ? "подход" : /(^|[^1])[234]$/.test(n) ? "подхода" : "подходов");
+
+  function muscles(it) {
+    const chip = (k, cls) => `<span class="fx-m ${cls}">${esc(MUSCLE[k] || k)}</span>`;
+    return `<div class="fx-muscles">${(it.muscles_main || []).map((k) => chip(k, "main")).join("")}${(it.muscles_secondary || []).map((k) => chip(k, "sec")).join("")}</div>`;
+  }
+  function photo(it) {
+    const local = "fitness-img/" + codeOf(it).toLowerCase() + ".webp";
+    return `<figure class="fx-photo"><img src="${esc(local)}" data-alt-src="${esc(it.image || "")}" alt="${esc(it.model)}" loading="lazy" decoding="async">
+      <figcaption>${esc(it.model)}</figcaption></figure>`;
+  }
+
+  function exerciseHtml(it, i, ph, c, logs) {
+    const code = codeOf(it), l = logs[code] || {}, sets = it.sets?.[PHASE_KEYS[ph]] || "2";
+    const last = lastWeight(day, code);
+    return `<article class="fx-ex${c[code] ? " done" : ""}">
+      <label class="fx-ex-head"><span class="fx-num">${i + 1}</span><b>${esc(it.name)}</b><input type="checkbox" data-check="${esc(code)}" ${c[code] ? "checked" : ""} aria-label="Сделано"></label>
+      <div class="fx-tags"><span>${esc(sets)} ${plural(sets)}</span><span>${esc(it.reps)}</span><span>Отдых ${esc(it.rest)}</span><span class="fx-kg">Старт ${esc(kg(it.start_kg))}</span></div>
+      ${photo(it)}
+      ${muscles(it)}
+      <div class="feedback-grid">
+        ${field("Вес, кг", `<input data-log="${esc(code)}" data-f="w" value="${esc(l.w || "")}" inputmode="decimal" placeholder="${esc(last ? "Было " + last : String(it.start_kg).replace(".", ","))}">`)}
+        ${field("Повторы", `<input data-log="${esc(code)}" data-f="r" value="${esc(l.r || "")}" placeholder="${esc(it.reps)}">`)}
+      </div>
+      <details><summary>Настройка и техника</summary><div class="fx-inst">
+        ${para("Мышцы", it.target)}
+        ${it.combined_note ? `<div class="success-box">${esc(it.combined_note)}</div>` : ""}
+        ${para("Настройка тренажёра", it.setup)}${para("Положение тела", it.position)}${para("Как выполнять", it.tech)}
+        ${para("Докуда опускать и поднимать", it.range)}${para("Дыхание", it.breath)}${para("Частые ошибки", it.errors)}
+        ${para("Как понять, что всё правильно", it.check)}${para("Когда прибавлять вес", it.step_rule)}${para("Если тренажёр занят", it.swap)}
+      </div></details>
+    </article>`;
+  }
 
   function trainHtml() {
-    const w = week(), p = phaseOf(w), list = EX[day], c = S.checks[day] || {}, logs = S.logs[day] || {};
-    const done = list.filter((_, i) => c[i]).length;
+    const w = week(), ph = phaseOf(w), D = P.days[day], list = items(day), c = S.checks[day] || {}, logs = S.logs[day] || {};
+    const done = list.filter((it) => c[codeOf(it)]).length;
+    const phase = P.phases[ph] || {};
     return `
       <div class="card fx-hero">
-        <div class="fx-eyebrow">Цикл 12 недель · Пн, Ср, Пт</div>
+        <div class="fx-eyebrow">Сплит на 12 недель · Пн, Ср, Пт</div>
         <div class="fx-week">
           <button class="btn-ghost" data-wk="-1" aria-label="Неделя назад" ${w <= 1 ? "disabled" : ""}>−</button>
           <b>Неделя ${w} из 12</b>
           <button class="btn-ghost" data-wk="1" aria-label="Неделя вперёд" ${w >= 12 ? "disabled" : ""}>+</button>
         </div>
-        <p class="muted"><b>${PHASES[p].weeks}.</b> ${esc(PHASES[p].hint)}</p>
+        <p class="muted"><b>${String(phase.weeks).includes("–") ? "Недели" : "Неделя"} ${esc(phase.weeks)}.</b> ${esc(phase.hint)}</p>
       </div>
-      <div class="fb-chips fx-days" role="tablist">${Object.keys(DAYS).map((k) =>
-        `<button class="fb-chip${k === day ? " on" : ""}" data-day="${k}" role="tab" aria-selected="${k === day}">${DAYS[k].chip}</button>`).join("")}</div>
+      ${tiredToday() ? `<div class="error-box fx-tired">${esc(P.recovery_rule)}</div>` : ""}
+      <div class="fb-chips fx-days" role="tablist">${Object.keys(P.days).map((k) =>
+        `<button class="fb-chip${k === day ? " on" : ""}" data-day="${k}" role="tab" aria-selected="${k === day}">${esc(P.days[k].chip)}</button>`).join("")}</div>
       <div class="shopping-progress">
-        <div class="fx-prog"><b>${esc(DAYS[day].title)}</b><span id="fxCount">${done}/${list.length}</span></div>
+        <div class="fx-prog"><b>${esc(D.title)}</b><span id="fxCount">${done}/${list.length}</span></div>
         <progress id="fxBar" max="${list.length}" value="${done}"></progress>
       </div>
-      ${list.map((x, i) => {
-        const l = logs[i] || {};
-        return `<article class="fx-ex${c[i] ? " done" : ""}">
-          <label class="fx-ex-head"><span class="fx-num">${i + 1}</span><b>${esc(x[0])}</b><input type="checkbox" data-check="${i}" ${c[i] ? "checked" : ""} aria-label="Сделано"></label>
-          <div class="fx-tags"><span>${p === 1 ? "2" : esc(x[1])} подхода</span><span>${esc(x[2])}</span><span>Отдых ${esc(x[3])}</span><span>${esc(x[4])}</span></div>
-          <div class="feedback-grid">
-            ${field("Вес / настройка", `<input data-log="${i}" data-f="w" value="${esc(l.w || "")}" placeholder="Например, 15 кг">`)}
-            ${field("Повторы", `<input data-log="${i}" data-f="r" value="${esc(l.r || "")}" placeholder="${esc(x[2])}">`)}
-          </div>
-          <details><summary>Техника и подсказки</summary><div class="fx-inst">
-            <b>Как выполнять</b><p>${esc(x[5])}</p><b>Контроль</b><p>${esc(x[6])}</p><b>Если тренажёра нет</b><p>${esc(x[7])}</p>
-          </div></details>
-        </article>`;
-      }).join("")}
+      <div class="card fx-text fx-before">
+        <p class="muted">${esc(D.focus || "")}</p>
+        <details><summary>Разминка · 5–7 минут</summary><p>${esc(D.warmup)}</p></details>
+      </div>
+      ${list.map((it, i) => exerciseHtml(it, i, ph, c, logs)).join("")}
+      <div class="card fx-text fx-after">
+        <details><summary>Кардио после силовой</summary><p>${esc(D.cardio)}</p></details>
+        <details><summary>Заминка · 5 минут</summary><p>${esc(D.cooldown)}</p></details>
+        <details><summary>Хаммам и сауна</summary><p>${esc(D.spa)}</p></details>
+      </div>
       <div class="card">
         <h3>Завершение занятия</h3>
         ${field("Как прошло занятие?", `<select id="fxMood">${options(MOODS)}</select>`)}
@@ -179,17 +230,26 @@
       </div>`;
   }
 
+  const MEASURE_FIELDS = [["w", "Вес, кг", "65"], ["waist", "Талия, см"], ["belly", "Живот по пупку, см"], ["pelvis", "Бёдра (таз), см"],
+    ["hips", "Ягодицы, см"], ["thigh", "Обхват бедра, см"], ["chest", "Грудь, см"]];
   function measuresHtml() {
-    return S.measures.length ? S.measures.map((x) => `<div class="fx-row"><b>${esc(x.date)}</b>
-      <span>Вес ${esc(x.w || "—")} кг · талия ${esc(x.waist || "—")} · живот ${esc(x.belly || "—")} · ягодицы ${esc(x.hips || "—")} см</span>
-      ${x.note ? `<small>${esc(x.note)}</small>` : ""}</div>`).join("") : '<p class="muted">Пока нет записей.</p>';
+    return S.measures.length ? S.measures.map((x) => {
+      const parts = MEASURE_FIELDS.slice(1).filter(([k]) => x[k]).map(([k, label]) => label.replace(", см", "").toLowerCase() + " " + x[k]);
+      return `<div class="fx-row"><b>${esc(x.date)}</b>
+      <span>Вес ${esc(x.w || "—")} кг${parts.length ? " · " + esc(parts.join(" · ")) + " см" : ""}</span>
+      ${x.note ? `<small>${esc(x.note)}</small>` : ""}</div>`;
+    }).join("") : '<p class="muted">Пока нет записей.</p>';
+  }
+  function exName(s, key) {
+    if (s.logs?.[key]?.n) return s.logs[key].n;
+    if (s.prog === PROG_ID) return items(s.day).find((it) => codeOf(it) === key)?.name || key;
+    return OLD_NAMES[s.day]?.[key] || "Упражнение";
   }
   function sessionsHtml() {
     return S.sessions.length ? S.sessions.map((x) => {
-      const list = EX[x.day] || [];
       const weights = Object.entries(x.logs || {}).filter(([, l]) => l && (l.w || l.r))
-        .map(([i, l]) => `${list[i]?.[0] || "Упражнение"}: ${[l.w, l.r && "× " + l.r].filter(Boolean).join(" ")}`);
-      return `<div class="fx-row"><b>${esc(x.date)} · тренировка ${esc(DAYS[x.day]?.letter || x.day)}</b>
+        .map(([k, l]) => `${exName(x, k)}: ${[l.w && l.w + " кг", l.r && "× " + l.r].filter(Boolean).join(" ")}`);
+      return `<div class="fx-row"><b>${esc(x.date)} · тренировка ${esc(LETTER[x.day] || x.day)}${x.prog === PROG_ID ? "" : " (старая программа)"}</b>
         <span>${Number(x.done) || 0}/${Number(x.total) || 0} упражнений · ${esc(x.mood)}</span>
         ${weights.length ? `<small>${esc(weights.join("; "))}</small>` : ""}</div>`;
     }).join("") : '<p class="muted">Пока нет записей.</p>';
@@ -204,14 +264,11 @@
     return `
       <div class="card">
         <h3>Замеры</h3>
-        <p class="muted">Раз в 4 недели, утром и в одинаковых условиях.</p>
+        <p class="muted">${esc(P.measures_when || "")}</p>
         <div class="feedback-grid">
-          ${field("Вес, кг", '<input id="fxW" type="number" step=".1" inputmode="decimal" placeholder="65">')}
-          ${field("Талия, см", '<input id="fxWaist" type="number" step=".1" inputmode="decimal">')}
-          ${field("Живот, см", '<input id="fxBelly" type="number" step=".1" inputmode="decimal">')}
-          ${field("Ягодицы, см", '<input id="fxHips" type="number" step=".1" inputmode="decimal">')}
+          ${MEASURE_FIELDS.map(([k, label, ph]) => field(label, `<input data-m="${k}" type="number" step=".1" inputmode="decimal"${ph ? ` placeholder="${ph}"` : ""}>`)).join("")}
         </div>
-        ${field("Комментарий", '<textarea id="fxMNote" rows="2" placeholder="Самочувствие, изменения…"></textarea>')}
+        ${field("Комментарий", '<textarea id="fxMNote" rows="2" placeholder="Самочувствие, фото сделаны…"></textarea>')}
         <button id="fxSaveMeasure" class="fx-wide">Сохранить замеры</button>
         ${syncLine()}
       </div>
@@ -221,73 +278,56 @@
   }
 
   function dayHtml() {
+    const w = week();
+    const steps = (P.steps || []).find((s) => {
+      const [a, b] = String(s.weeks).split("–").map(Number);
+      return w >= a && w <= (b || a);
+    });
     return `
       <div class="card">
         <h3>Ежедневная отметка</h3>
         <div class="feedback-grid">
-          ${field("Шаги", '<input id="fxSteps" type="number" inputmode="numeric" placeholder="4500">')}
+          ${field("Шаги", '<input id="fxSteps" type="number" inputmode="numeric" placeholder="5000">')}
           ${field("Сон", `<select id="fxSleep"><option value="">Выбрать</option>${options(SLEEP)}</select>`)}
         </div>
         ${field("Самочувствие", `<select id="fxEnergy">${options(ENERGY)}</select>`)}
-        ${field("Заметка", '<textarea id="fxDNote" rows="2" placeholder="Прогулка, стресс, восстановление…"></textarea>')}
+        ${field("Заметка", '<textarea id="fxDNote" rows="2" placeholder="Прогулка, стресс, цикл…"></textarea>')}
         <button id="fxSaveDay" class="fx-wide">Сохранить день</button>
         ${syncLine()}
       </div>
       <div class="card fx-text">
-        <h3>Небольшие ориентиры</h3>
-        <ul>
-          <li>Сейчас ориентир — 3–5 тысяч шагов. Добавляй понемногу, небольшими прогулками.</li>
-          <li>Постепенно увеличивай время сна; взрослым обычно рекомендуют 7–9 часов.</li>
-          <li>После плохого сна не повышай веса. При выраженной усталости облегчи занятие.</li>
-          <li>В дни без зала достаточно прогулки и восстановления.</li>
-        </ul>
+        <h3>Шаги</h3>
+        <p>${steps ? `Неделя ${w}: <b>${esc(steps.target)}</b> шагов в день.` : ""} ${esc(P.steps_hint || "")}</p>
+        <h3>Сон</h3>
+        <ul>${(P.sleep || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ul>
       </div>`;
   }
 
   function guideHtml() {
-    const rows = [["Пн", "Тренировка А — ноги, ягодицы, спина"], ["Вт", "Прогулка и обычная активность"], ["Ср", "Тренировка Б — всё тело и корпус"],
-      ["Чт", "Прогулка, мягкая мобильность"], ["Пт", "Тренировка В — ягодицы, верх тела, хват"], ["Сб, Вс", "Отдых и прогулки по желанию"]];
-    const path = [["1–2", "Освоить тренажёры и технику."], ["3–4", "Закрепить движения, при готовности добавить подход."],
-      ["5–8", "Постепенно увеличивать рабочие веса."], ["9–12", "Закрепить прогресс и оценить готовность к следующему этапу."]];
+    const rows = [["Пн", "Тренировка А — " + P.days.A.title.toLowerCase()], ["Вт", "Прогулки 10–15 минут после еды"], ["Ср", "Тренировка Б — " + P.days.B.title.toLowerCase()],
+      ["Чт", "Прогулки, мягкая мобильность"], ["Пт", "Тренировка В — " + P.days.C.title.toLowerCase()], ["Сб, Вс", "Отдых и прогулки"]];
     return `
       <div class="card">
         <h3>Ритм недели</h3>
-        ${rows.map(([d, t]) => `<div class="meal-row"><span class="meal-label">${d}</span><span>${t}</span></div>`).join("")}
+        ${rows.map(([d, t]) => `<div class="meal-row"><span class="meal-label">${d}</span><span>${esc(t)}</span></div>`).join("")}
+        <p class="muted fx-note">${esc(P.split_check || "")}</p>
       </div>
       <div class="card">
         <h3>Путь на 12 недель</h3>
-        <div class="fx-path">${path.map(([w, t]) => `<div><b>${w}</b><span>${t}</span></div>`).join("")}</div>
-        <div class="success-box">Повышай вес, только если верхняя граница повторений получается с хорошей техникой и запасом 2–3 повтора на двух тренировках подряд. Не увеличивай одновременно вес, подходы и кардио.</div>
+        <div class="fx-path">${P.phases.slice(0, 5).map((x) => `<div><b>${esc(x.weeks)}</b><span>${esc(x.hint)}</span></div>`).join("")}</div>
+        <div class="success-box">${esc(P.progression_rule)}</div>
+        <p class="muted fx-note">${esc(P.recovery_rule)}</p>
+        <p class="muted fx-note">${esc(P.stack_note)}</p>
       </div>
       <div class="card fx-text">
-        <h3>Как начать в зале</h3>
-        <ol>
-          <li>Выбери тренировку А, Б или В, возьми воду и переоденься.</li>
-          <li>5–7 минут спокойно походи на дорожке или покрути велосипед.</li>
-          <li>Найди первый тренажёр, прочитай схему на корпусе. Если настройки или фиксаторы непонятны — попроси сотрудника показать.</li>
-          <li>Начни с минимального веса и сделай пробный подход.</li>
-          <li>Выполняй упражнения по порядку, отдыхай указанное время.</li>
-          <li>В конце спокойно походи, запиши веса и самочувствие.</li>
-        </ol>
+        <h3>Цель</h3><p>${esc(P.goal)}</p>
+        <h3>Подготовка к пилону</h3><p>${esc(P.pole)}</p>
+        <h3>Хаммам и сауна</h3><p>${esc(P.spa)}</p>
+        <h3>Цикл</h3><p>${esc(P.cycle)}</p>
+        <h3>Замеры</h3><p>${esc((P.measures || []).join(", "))}. ${esc(P.measures_when || "")}</p>
       </div>
       <div class="card fx-text">
-        <h3>Техника и безопасность</h3>
-        <ul>
-          <li>Двигай вес плавно, не бросай груз.</li>
-          <li>Выдыхай на усилии, вдыхай при возвращении.</li>
-          <li>Не задерживай дыхание и не работай через острую боль.</li>
-          <li>На старте оставляй 3–4 повтора в запасе.</li>
-          <li>Если тренажёр незнаком — не угадывай настройки.</li>
-        </ul>
-        <div class="error-box"><b>Останови тренировку</b>, если появилась боль или сдавление в груди, предобморочное состояние, необычная сильная одышка, выраженное головокружение или острая суставная боль. При тяжёлых или сохраняющихся симптомах обратись за медицинской помощью.</div>
-      </div>
-      <div class="card fx-text">
-        <h3>Подготовка к пилону</h3>
-        <p>Первый цикл укрепляет спину, плечи, лопатки, хват и мышцы корпуса. После трёхлетнего перерыва не начинай самостоятельно сложные висы, инверты и трюки. Возвращайся постепенно, с инструктором и страховкой.</p>
-        <h3>Сауна и хаммам</h3>
-        <p>Это необязательная возможность расслабиться, а не способ сжигать жир. Начинай с короткого посещения, выходи при ухудшении самочувствия. Не используй жару при обезвоживании или головокружении.</p>
-        <h3>Важно помнить</h3>
-        <p>Нельзя локально сжечь жир на животе отдельными упражнениями. Тренировка грудных мышц укрепляет мышцы и может улучшить осанку, но не увеличивает ткань молочной железы. Вес 50 кг при росте 168 см ниже стандартной нижней границы ИМТ — ориентируйся прежде всего на силу, здоровье и состав тела, а не на эту цифру.</p>
+        <div class="error-box"><b>Стоп-сигналы.</b> ${esc(P.stop_signals)}</div>
       </div>
       <p class="muted fx-foot">Личный тренировочный помощник · не заменяет медицинскую консультацию</p>`;
   }
@@ -307,6 +347,11 @@
 
   function bind() {
     const on = (sel, ev, fn) => box.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, () => fn(el)));
+    // своя копия фото не загрузилась — берём оригинал с сайта Matrix, не вышло и он — прячем рамку
+    box.querySelectorAll(".fx-photo img").forEach((img) => img.addEventListener("error", () => {
+      const alt = img.dataset.altSrc;
+      if (alt && img.src !== alt) { img.src = alt; img.dataset.altSrc = ""; } else img.closest(".fx-photo")?.remove();
+    }));
     on("[data-wk]", "click", (b) => {
       const d = Number(b.dataset.wk), w = week() + d;
       if (w < 1 || w > 12) return;
@@ -320,8 +365,8 @@
       S.checks[day] = S.checks[day] || {};
       S.checks[day][cb.dataset.check] = cb.checked;
       cb.closest(".fx-ex").classList.toggle("done", cb.checked);
-      const n = EX[day].filter((_, i) => S.checks[day][i]).length;
-      box.querySelector("#fxCount").textContent = n + "/" + EX[day].length;
+      const n = items(day).filter((it) => S.checks[day][codeOf(it)]).length;
+      box.querySelector("#fxCount").textContent = n + "/" + items(day).length;
       box.querySelector("#fxBar").value = n;
       ctx.haptic(cb.checked ? "light" : "select");
       save();
@@ -332,9 +377,13 @@
       save();
     });
     on("#fxSaveWork", "click", () => {
-      const c = S.checks[day] || {};
-      S.sessions.unshift({ id: uid(), ts: Date.now(), date: today(), day, done: Object.values(c).filter(Boolean).length,
-        total: EX[day].length, mood: val("#fxMood"), logs: JSON.parse(JSON.stringify(S.logs[day] || {})) });
+      const c = S.checks[day] || {}, list = items(day), cur = S.logs[day] || {}, logs = {};
+      for (const it of list) {
+        const code = codeOf(it), l = cur[code];
+        if (l && (l.w || l.r)) logs[code] = { w: l.w || "", r: l.r || "", n: it.name };
+      }
+      S.sessions.unshift({ id: uid(), ts: Date.now(), date: today(), day, prog: PROG_ID, week: week(),
+        done: list.filter((it) => c[codeOf(it)]).length, total: list.length, mood: val("#fxMood"), logs });
       ctx.haptic("medium");
       save();
       ctx.notify("Тренировка сохранена в журнал.");
@@ -345,7 +394,8 @@
       save(); render();
     });
     on("#fxSaveMeasure", "click", () => {
-      const m = { w: val("#fxW"), waist: val("#fxWaist"), belly: val("#fxBelly"), hips: val("#fxHips"), note: val("#fxMNote") };
+      const m = { note: val("#fxMNote") };
+      box.querySelectorAll("[data-m]").forEach((el) => { m[el.dataset.m] = el.value.trim(); });
       if (!Object.values(m).some(Boolean)) { ctx.notify("Заполни хотя бы одно поле."); return; }
       S.measures.unshift({ id: uid(), ts: Date.now(), date: today(), ...m });
       ctx.haptic("medium");
@@ -362,9 +412,16 @@
 
   async function mount(el, context, screen) {
     ctx = context; box = el; sub = screen || "train";
+    try {
+      await loadProgram();
+    } catch (e) {
+      box.innerHTML = `<p>${esc(e.message)}</p><button id="fxRetry">Повторить</button>`;
+      box.querySelector("#fxRetry")?.addEventListener("click", () => mount(el, context, screen));
+      return;
+    }
     render();
     if (await pull()) render();
   }
 
-  window.Fitness = { mount, _test: { norm, phaseOf, EX } };
+  window.Fitness = { mount, _test: { norm, phaseOf, codeOf, PROG_ID } };
 })();
