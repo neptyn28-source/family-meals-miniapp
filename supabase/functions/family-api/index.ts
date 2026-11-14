@@ -724,10 +724,13 @@ async function main(req: Request) {
       return reply({ ok: true, feedback: r.data });
     }
 
+    // Дневник жены — корень state (как было), дневник мужа — state.me. Чужую часть никогда не перезаписываем.
     if (action === "fitness.get") {
       const r = await db.from("fitness_journal").select("state,updated_at").eq("family_id", familyId).maybeSingle();
       if (r.error) throw r.error;
-      return reply({ ok: true, state: r.data?.state ?? null, updated_at: r.data?.updated_at ?? null });
+      const root = r.data?.state ?? null;
+      const state = payload.who === "me" ? (root?.me ?? null) : root;
+      return reply({ ok: true, state, updated_at: r.data?.updated_at ?? null });
     }
 
     if (action === "fitness.save") {
@@ -738,7 +741,11 @@ async function main(req: Request) {
       }
       const current = await db.from("fitness_journal").select("state").eq("family_id", familyId).maybeSingle();
       if (current.error) throw current.error;
-      const next = mergeFitness(current.data?.state ?? {}, incoming);
+      const prevRoot = (current.data?.state ?? {}) as Json;
+      const prevMe = prevRoot.me && typeof prevRoot.me === "object" && !Array.isArray(prevRoot.me) ? prevRoot.me as Json : {};
+      const next = payload.who === "me"
+        ? { ...prevRoot, me: mergeFitness(prevMe, incoming) }
+        : { ...mergeFitness(prevRoot, incoming), ...(prevRoot.me ? { me: prevRoot.me } : {}) };
       const saved = await db.from("fitness_journal").upsert({
         family_id: familyId,
         state: next,
@@ -746,7 +753,8 @@ async function main(req: Request) {
         updated_by: auth.user.id,
       }, { onConflict: "family_id" }).select("state,updated_at").single();
       if (saved.error) throw saved.error;
-      return reply({ ok: true, state: saved.data.state, updated_at: saved.data.updated_at });
+      const savedState = saved.data.state as Json;
+      return reply({ ok: true, state: payload.who === "me" ? savedState.me : savedState, updated_at: saved.data.updated_at });
     }
 
     return reply({ ok: false, error: "Unknown action" }, 400);

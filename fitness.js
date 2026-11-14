@@ -1,11 +1,14 @@
-// Вкладка «Фитнес»: 12-недельный сплит жены в DDX (А — ноги и ягодицы, Б — спина, В — грудь и плечи).
-// Программа — данные в fitness-wife.json, фото тренажёров — fitness-img/<модель>.webp (копии с сайта Matrix).
-// Подключается из app-v2.js; дневник — family-api (fitness.get / fitness.save), общий для всей семьи.
+// Вкладка «Фитнес»: две 12-недельные программы в DDX — жены (fitness-wife.json) и мужа (fitness-me.json).
+// Переключатель «Жена / Муж» вверху; у каждого свой дневник. Фото тренажёров — fitness-img/<модель>.webp (копии с сайта Matrix).
+// Подключается из app-v2.js; дневник — family-api (fitness.get / fitness.save с who), общий для всей семьи.
 (function () {
   "use strict";
 
-  const PROGRAM_URL = "fitness-wife.json";
-  const PROG_ID = "wife-split-1";
+  const PEOPLE = {
+    wife: { label: "Жена", url: "fitness-wife.json", prog: "wife-split-1", suffix: "" },
+    me: { label: "Муж", url: "fitness-me.json", prog: "me-aesthetic-1", suffix: "_me" },
+  };
+  const WHO_KEY = "doma_fitness_who";
   // Названия упражнений старой программы — чтобы старые записи журнала читались правильно.
   const OLD_NAMES = {
     A: ["Жим ногами", "Ягодичный мост в тренажёре", "Сгибание ног сидя", "Отведение бёдер", "Тяга верхнего блока", "Жим от груди"],
@@ -20,14 +23,12 @@
     abs: "пресс", obliques: "косые мышцы живота", glute_max: "большая ягодичная", glute_med: "средняя ягодичная",
     adductors: "приводящие", quads: "квадрицепс", hamstrings: "бицепс бедра", calves: "икры",
   };
-  const PHASE_KEYS = ["w1_2", "w3_4", "w5_8", "w9_11", "w12"];
-  const MOODS = ["Комфортно", "Было тяжело, но техника сохранялась", "Сильно устала", "Была боль или необычные симптомы"];
   const SLEEP = ["Менее 6 часов", "6–7 часов", "7–8 часов", "Более 8 часов"];
-  const ENERGY = ["Хорошее", "Обычное", "Устала", "Плохое"];
   const WEEK_MS = 7 * 24 * 3600 * 1000;
-  const CACHE = "doma_fitness_cache";
-  const DIRTY = "doma_fitness_dirty";
-  const PCACHE = "doma_fitness_program";
+  const male = () => P?.gender === "m";
+  const moods = () => ["Комфортно", "Было тяжело, но техника сохранялась", male() ? "Сильно устал" : "Сильно устала", "Была боль или необычные симптомы"];
+  const energy = () => ["Хорошее", "Обычное", male() ? "Устал" : "Устала", "Плохое"];
+  const isTired = (e) => e === "Устала" || e === "Устал" || e === "Плохое";
 
   // ---------- состояние ----------
   // В checks/logs старой программы ключи — номера упражнений; у новой — код тренажёра. Номера отбрасываем.
@@ -54,15 +55,31 @@
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
   };
-  let S = (() => { try { return norm(JSON.parse(store.get(CACHE))); } catch { return norm(); } })();
-  let P = (() => { try { return JSON.parse(store.get(PCACHE)) || null; } catch { return null; } })();
+  let who = PEOPLE[store.get(WHO_KEY)] ? store.get(WHO_KEY) : "wife";
+  const person = () => PEOPLE[who];
+  const PROG = () => person().prog;
+  // Ключи телефона: у жены прежние (без суффикса), у мужа — с «_me».
+  const CACHE = () => "doma_fitness_cache" + person().suffix;
+  const DIRTY = () => "doma_fitness_dirty" + person().suffix;
+  const PCACHE = () => "doma_fitness_program" + person().suffix;
+  const readState = () => { try { return norm(JSON.parse(store.get(CACHE()))); } catch { return norm(); } };
+  const readProgram = () => { try { return JSON.parse(store.get(PCACHE())) || null; } catch { return null; } };
+  let S = readState();
+  let P = readProgram();
   let ctx = null, box = null, sub = "train";
   let day = ({ 1: "A", 2: "B", 3: "B", 4: "C", 5: "C" })[new Date().getDay()] || "A";
   let timer = 0, busy = false, again = false, moved = false, syncText = "";
 
   const week = () => Math.min(12, Math.max(1, Math.floor((Date.now() - (S.start || Date.now())) / WEEK_MS) + 1));
-  const phaseOf = (w) => (w <= 2 ? 0 : w <= 4 ? 1 : w <= 8 ? 2 : w <= 11 ? 3 : 4);
-  const codeOf = (it) => (String(it.model).match(/\((G\d+-S\d+)\)/) || [])[1] || it.name;
+  // Фазы берём из программы: «1–2», «3–6», «12»… Строки без цифр («Всегда») — не фазы.
+  const phases = () => (P?.phases || []).filter((x) => /^\d/.test(String(x.weeks)));
+  const range = (s) => { const [a, b] = String(s).split("–").map(Number); return [a, b || a]; };
+  const phaseOf = (w) => Math.max(0, phases().findIndex((x) => { const [a, b] = range(x.weeks); return w >= a && w <= b; }));
+  const phaseKey = (i) => "w" + String(phases()[i]?.weeks || "1–2").replace("–", "_");
+  const codeOf = (it) => (String(it.model).match(/\(([A-Z]+\d*-[A-Z]+\d+)/) || [])[1] || it.name;
+  // Стартовый вес: у жены одно число, у мужа — план по подходам (берём первый рабочий).
+  const startKg = (it) => it.start_kg ?? (it.plan_kg || []).find((x) => x.set !== "разминка")?.kg ?? "";
+  const planLine = (it) => (it.plan_kg || []).map((x) => (x.set === "разминка" ? "разминка " : "") + (x.kg ? String(x.kg).replace(".", ",") + " кг" : "свой вес") + " × " + x.reps).join(" → ");
   const items = (d) => P?.days?.[d]?.items || [];
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const today = () => new Date().toLocaleDateString("ru-RU");
@@ -72,7 +89,7 @@
   // Последний записанный вес этого упражнения — подсказка в поле «Вес».
   function lastWeight(d, code) {
     for (const s of S.sessions) {
-      if (s.day !== d || s.prog !== PROG_ID) continue;
+      if (s.day !== d || s.prog !== PROG()) continue;
       const w = s.logs?.[code]?.w;
       if (w) return w;
     }
@@ -81,16 +98,16 @@
   // Сегодня отмечен плохой сон или усталость — напоминание не повышать веса.
   function tiredToday() {
     const x = S.daily.find((e) => e.date === today());
-    return !!x && (x.sleep === SLEEP[0] || x.energy === ENERGY[2] || x.energy === ENERGY[3]);
+    return !!x && (x.sleep === SLEEP[0] || isTired(x.energy));
   }
 
   // ---------- программа ----------
   async function loadProgram() {
     try {
-      const r = await fetch(PROGRAM_URL + "?v=" + Date.now(), { cache: "no-store" });
+      const r = await fetch(person().url + "?v=" + Date.now(), { cache: "no-store" });
       if (!r.ok) throw new Error(String(r.status));
       P = await r.json();
-      store.set(PCACHE, JSON.stringify(P));
+      store.set(PCACHE(), JSON.stringify(P));
     } catch (e) {
       if (!P) throw new Error("Не загрузилась программа тренировок, проверьте интернет");
     }
@@ -101,11 +118,11 @@
     syncText = text;
     box?.querySelectorAll(".fx-sync").forEach((el) => { el.textContent = text; });
   }
-  function cache() { store.set(CACHE, JSON.stringify(S)); }
+  function cache() { store.set(CACHE(), JSON.stringify(S)); }
   function save() {
     S.start = S.start || Date.now();
     cache();
-    store.set(DIRTY, "1");
+    store.set(DIRTY(), "1");
     setSync("Сохраняю…");
     clearTimeout(timer);
     timer = setTimeout(push, 700);
@@ -115,8 +132,10 @@
     busy = true;
     const m = moved; moved = false;
     try {
-      const r = await ctx.api("fitness.save", { state: { ...S, start_set: m } });
-      store.set(DIRTY, null);
+      const w = who, state = { ...S, start_set: m };
+      const r = await ctx.api("fitness.save", { who: w, state });
+      if (w !== who) return; // пока сохраняли, переключились на другого — его S не трогаем
+      store.set(DIRTY(), null);
       // сервер добавил записи с других телефонов — берём журналы, текущие поля не трогаем
       const n = norm(r.state);
       S.sessions = n.sessions; S.measures = n.measures; S.daily = n.daily;
@@ -135,9 +154,11 @@
   async function pull() {
     setSync("Загружаю…");
     try {
-      const r = await ctx.api("fitness.get");
+      const w = who;
+      const r = await ctx.api("fitness.get", { who: w });
+      if (w !== who) return false;
       const hasLocal = S.start || S.sessions.length || S.measures.length || S.daily.length;
-      if (store.get(DIRTY) === "1" || !r.state) {
+      if (store.get(DIRTY()) === "1" || !r.state) {
         if (r.state || hasLocal) await push(); else setSync("Сохранено · видно всей семье");
         return false;
       }
@@ -169,15 +190,16 @@
   }
 
   function exerciseHtml(it, i, ph, c, logs) {
-    const code = codeOf(it), l = logs[code] || {}, sets = it.sets?.[PHASE_KEYS[ph]] || "2";
+    const code = codeOf(it), l = logs[code] || {}, sets = it.sets?.[phaseKey(ph)] || "2";
     const last = lastWeight(day, code);
     return `<article class="fx-ex${c[code] ? " done" : ""}">
       <label class="fx-ex-head"><span class="fx-num">${i + 1}</span><b>${esc(it.name)}</b><input type="checkbox" data-check="${esc(code)}" ${c[code] ? "checked" : ""} aria-label="Сделано"></label>
-      <div class="fx-tags"><span>${esc(sets)} ${plural(sets)}</span><span>${esc(it.reps)}</span><span>Отдых ${esc(it.rest)}</span><span class="fx-kg">Старт ${esc(kg(it.start_kg))}</span></div>
+      <div class="fx-tags"><span>${esc(sets)} ${plural(sets)}</span><span>${esc(it.reps)}</span><span>Отдых ${esc(it.rest)}</span><span class="fx-kg">Старт ${esc(kg(startKg(it)))}</span></div>
+      ${it.plan_kg ? `<p class="fx-plan">${esc(planLine(it))}</p>` : ""}
       ${photo(it)}
       ${muscles(it)}
       <div class="feedback-grid">
-        ${field("Вес, кг", `<input data-log="${esc(code)}" data-f="w" value="${esc(l.w || "")}" inputmode="decimal" placeholder="${esc(last ? "Было " + last : String(it.start_kg).replace(".", ","))}">`)}
+        ${field("Вес, кг", `<input data-log="${esc(code)}" data-f="w" value="${esc(l.w || "")}" inputmode="decimal" placeholder="${esc(last ? "Было " + last : String(startKg(it)).replace(".", ","))}">`)}
         ${field("Повторы", `<input data-log="${esc(code)}" data-f="r" value="${esc(l.r || "")}" placeholder="${esc(it.reps)}">`)}
       </div>
       <details><summary>Настройка и техника</summary><div class="fx-inst">
@@ -193,7 +215,7 @@
   function trainHtml() {
     const w = week(), ph = phaseOf(w), D = P.days[day], list = items(day), c = S.checks[day] || {}, logs = S.logs[day] || {};
     const done = list.filter((it) => c[codeOf(it)]).length;
-    const phase = P.phases[ph] || {};
+    const phase = phases()[ph] || {};
     return `
       <div class="card fx-hero">
         <div class="fx-eyebrow">Сплит на 12 недель · Пн, Ср, Пт</div>
@@ -204,7 +226,7 @@
         </div>
         <p class="muted"><b>${String(phase.weeks).includes("–") ? "Недели" : "Неделя"} ${esc(phase.weeks)}.</b> ${esc(phase.hint)}</p>
       </div>
-      ${tiredToday() ? `<div class="error-box fx-tired">${esc(P.recovery_rule)}</div>` : ""}
+      ${tiredToday() && P.recovery_rule ? `<div class="error-box fx-tired">${esc(P.recovery_rule)}</div>` : ""}
       <div class="fb-chips fx-days" role="tablist">${Object.keys(P.days).map((k) =>
         `<button class="fb-chip${k === day ? " on" : ""}" data-day="${k}" role="tab" aria-selected="${k === day}">${esc(P.days[k].chip)}</button>`).join("")}</div>
       <div class="shopping-progress">
@@ -223,18 +245,23 @@
       </div>
       <div class="card">
         <h3>Завершение занятия</h3>
-        ${field("Как прошло занятие?", `<select id="fxMood">${options(MOODS)}</select>`)}
+        ${field("Как прошло занятие?", `<select id="fxMood">${options(moods())}</select>`)}
         <button id="fxSaveWork" class="fx-wide">Сохранить тренировку</button>
         <button id="fxReset" class="btn-ghost fx-wide">Сбросить отметки дня</button>
         ${syncLine()}
       </div>`;
   }
 
-  const MEASURE_FIELDS = [["w", "Вес, кг", "65"], ["waist", "Талия, см"], ["belly", "Живот по пупку, см"], ["pelvis", "Бёдра (таз), см"],
-    ["hips", "Ягодицы, см"], ["thigh", "Обхват бедра, см"], ["chest", "Грудь, см"]];
+  const MEASURE_FIELDS = {
+    wife: [["w", "Вес, кг", "65"], ["waist", "Талия, см"], ["belly", "Живот по пупку, см"], ["pelvis", "Бёдра (таз), см"],
+      ["hips", "Ягодицы, см"], ["thigh", "Обхват бедра, см"], ["chest", "Грудь, см"]],
+    me: [["w", "Вес, кг (среднее за неделю)", "87,5"], ["waist", "Талия, см"], ["chest", "Грудь, см"], ["shoulders", "Плечи, см"],
+      ["arm", "Бицепс, см"], ["thigh", "Бедро, см"]],
+  };
+  const mfields = () => MEASURE_FIELDS[who];
   function measuresHtml() {
     return S.measures.length ? S.measures.map((x) => {
-      const parts = MEASURE_FIELDS.slice(1).filter(([k]) => x[k]).map(([k, label]) => label.replace(", см", "").toLowerCase() + " " + x[k]);
+      const parts = mfields().slice(1).filter(([k]) => x[k]).map(([k, label]) => label.replace(", см", "").toLowerCase() + " " + x[k]);
       return `<div class="fx-row"><b>${esc(x.date)}</b>
       <span>Вес ${esc(x.w || "—")} кг${parts.length ? " · " + esc(parts.join(" · ")) + " см" : ""}</span>
       ${x.note ? `<small>${esc(x.note)}</small>` : ""}</div>`;
@@ -242,14 +269,14 @@
   }
   function exName(s, key) {
     if (s.logs?.[key]?.n) return s.logs[key].n;
-    if (s.prog === PROG_ID) return items(s.day).find((it) => codeOf(it) === key)?.name || key;
-    return OLD_NAMES[s.day]?.[key] || "Упражнение";
+    if (s.prog === PROG()) return items(s.day).find((it) => codeOf(it) === key)?.name || key;
+    return (who === "wife" && OLD_NAMES[s.day]?.[key]) || "Упражнение";
   }
   function sessionsHtml() {
     return S.sessions.length ? S.sessions.map((x) => {
       const weights = Object.entries(x.logs || {}).filter(([, l]) => l && (l.w || l.r))
         .map(([k, l]) => `${exName(x, k)}: ${[l.w && l.w + " кг", l.r && "× " + l.r].filter(Boolean).join(" ")}`);
-      return `<div class="fx-row"><b>${esc(x.date)} · тренировка ${esc(LETTER[x.day] || x.day)}${x.prog === PROG_ID ? "" : " (старая программа)"}</b>
+      return `<div class="fx-row"><b>${esc(x.date)} · тренировка ${esc(LETTER[x.day] || x.day)}${x.prog === PROG() ? "" : " (старая программа)"}</b>
         <span>${Number(x.done) || 0}/${Number(x.total) || 0} упражнений · ${esc(x.mood)}</span>
         ${weights.length ? `<small>${esc(weights.join("; "))}</small>` : ""}</div>`;
     }).join("") : '<p class="muted">Пока нет записей.</p>';
@@ -266,9 +293,9 @@
         <h3>Замеры</h3>
         <p class="muted">${esc(P.measures_when || "")}</p>
         <div class="feedback-grid">
-          ${MEASURE_FIELDS.map(([k, label, ph]) => field(label, `<input data-m="${k}" type="number" step=".1" inputmode="decimal"${ph ? ` placeholder="${ph}"` : ""}>`)).join("")}
+          ${mfields().map(([k, label, ph]) => field(label, `<input data-m="${k}" type="number" step=".1" inputmode="decimal"${ph ? ` placeholder="${ph}"` : ""}>`)).join("")}
         </div>
-        ${field("Комментарий", '<textarea id="fxMNote" rows="2" placeholder="Самочувствие, фото сделаны…"></textarea>')}
+        ${field("Комментарий", '<textarea id="fxMNote" rows="2" placeholder="Фото сделаны, самочувствие…"></textarea>')}
         <button id="fxSaveMeasure" class="fx-wide">Сохранить замеры</button>
         ${syncLine()}
       </div>
@@ -290,8 +317,8 @@
           ${field("Шаги", '<input id="fxSteps" type="number" inputmode="numeric" placeholder="5000">')}
           ${field("Сон", `<select id="fxSleep"><option value="">Выбрать</option>${options(SLEEP)}</select>`)}
         </div>
-        ${field("Самочувствие", `<select id="fxEnergy">${options(ENERGY)}</select>`)}
-        ${field("Заметка", '<textarea id="fxDNote" rows="2" placeholder="Прогулка, стресс, цикл…"></textarea>')}
+        ${field("Самочувствие", `<select id="fxEnergy">${options(energy())}</select>`)}
+        ${field("Заметка", '<textarea id="fxDNote" rows="2" placeholder="${who === "me" ? "Спина, стресс, сауна…" : "Прогулка, стресс, цикл…"}"></textarea>')}
         <button id="fxSaveDay" class="fx-wide">Сохранить день</button>
         ${syncLine()}
       </div>
@@ -304,8 +331,9 @@
   }
 
   function guideHtml() {
-    const rows = [["Пн", "Тренировка А — " + P.days.A.title.toLowerCase()], ["Вт", "Прогулки 10–15 минут после еды"], ["Ср", "Тренировка Б — " + P.days.B.title.toLowerCase()],
+    const rows = P.week_rows || [["Пн", "Тренировка А — " + P.days.A.title.toLowerCase()], ["Вт", "Прогулки 10–15 минут после еды"], ["Ср", "Тренировка Б — " + P.days.B.title.toLowerCase()],
       ["Чт", "Прогулки, мягкая мобильность"], ["Пт", "Тренировка В — " + P.days.C.title.toLowerCase()], ["Сб, Вс", "Отдых и прогулки"]];
+    const sec = (title, text) => (text ? `<h3>${esc(title)}</h3><p>${esc(text)}</p>` : "");
     return `
       <div class="card">
         <h3>Ритм недели</h3>
@@ -314,16 +342,14 @@
       </div>
       <div class="card">
         <h3>Путь на 12 недель</h3>
-        <div class="fx-path">${P.phases.slice(0, 5).map((x) => `<div><b>${esc(x.weeks)}</b><span>${esc(x.hint)}</span></div>`).join("")}</div>
+        <div class="fx-path">${phases().map((x) => `<div><b>${esc(x.weeks)}</b><span>${esc(x.hint)}</span></div>`).join("")}</div>
         <div class="success-box">${esc(P.progression_rule)}</div>
-        <p class="muted fx-note">${esc(P.recovery_rule)}</p>
+        ${P.recovery_rule ? `<p class="muted fx-note">${esc(P.recovery_rule)}</p>` : ""}
         <p class="muted fx-note">${esc(P.stack_note)}</p>
       </div>
       <div class="card fx-text">
-        <h3>Цель</h3><p>${esc(P.goal)}</p>
-        <h3>Подготовка к пилону</h3><p>${esc(P.pole)}</p>
-        <h3>Хаммам и сауна</h3><p>${esc(P.spa)}</p>
-        <h3>Цикл</h3><p>${esc(P.cycle)}</p>
+        ${sec("Цель", P.goal)}${sec("Подготовка к пилону", P.pole)}${sec("Хаммам и сауна", P.spa)}${sec("Цикл", P.cycle)}
+        ${sec("Если заболела спина между лопатками", P.back_flare)}${sec("Пример записи в журнал", P.log_example)}
         <h3>Замеры</h3><p>${esc((P.measures || []).join(", "))}. ${esc(P.measures_when || "")}</p>
       </div>
       <div class="card fx-text">
@@ -336,7 +362,9 @@
   function render() {
     if (!box?.isConnected) return;
     const html = { train: trainHtml, progress: progressHtml, day: dayHtml, guide: guideHtml }[sub] || trainHtml;
-    box.innerHTML = html();
+    const chips = Object.entries(PEOPLE).map(([k, p]) =>
+      `<button class="fb-chip${k === who ? " on" : ""}" data-who="${k}" role="tab" aria-selected="${k === who}">${esc(p.label)}</button>`).join("");
+    box.innerHTML = `<div class="fb-chips fx-who" role="tablist" aria-label="Чья программа">${chips}</div>` + html();
     bind();
   }
   function refreshHistory() {
@@ -360,6 +388,7 @@
       ctx.haptic();
       save(); render();
     });
+    on("[data-who]", "click", (b) => { if (b.dataset.who !== who) { ctx.haptic(); switchTo(b.dataset.who); } });
     on("[data-day]", "click", (b) => { if (b.dataset.day === day) return; day = b.dataset.day; ctx.haptic(); render(); });
     on("[data-check]", "change", (cb) => {
       S.checks[day] = S.checks[day] || {};
@@ -382,7 +411,7 @@
         const code = codeOf(it), l = cur[code];
         if (l && (l.w || l.r)) logs[code] = { w: l.w || "", r: l.r || "", n: it.name };
       }
-      S.sessions.unshift({ id: uid(), ts: Date.now(), date: today(), day, prog: PROG_ID, week: week(),
+      S.sessions.unshift({ id: uid(), ts: Date.now(), date: today(), day, prog: PROG(), week: week(),
         done: list.filter((it) => c[codeOf(it)]).length, total: list.length, mood: val("#fxMood"), logs });
       ctx.haptic("medium");
       save();
@@ -410,8 +439,18 @@
     });
   }
 
+  // Переключение «Жена / Муж»: сначала дописываем несохранённое текущего, потом грузим другого.
+  async function switchTo(k) {
+    if (!PEOPLE[k]) return;
+    if (timer) { clearTimeout(timer); timer = 0; if (store.get(DIRTY()) === "1") await push(); }
+    who = k; store.set(WHO_KEY, k);
+    S = readState(); P = readProgram(); syncText = "";
+    await mount(box, ctx, sub);
+  }
+
   async function mount(el, context, screen) {
     ctx = context; box = el; sub = screen || "train";
+    if (!P) box.innerHTML = '<p class="muted">Загружаю программу…</p>';
     try {
       await loadProgram();
     } catch (e) {
@@ -423,5 +462,5 @@
     if (await pull()) render();
   }
 
-  window.Fitness = { mount, _test: { norm, phaseOf, codeOf, PROG_ID } };
+  window.Fitness = { mount, _test: { norm, phaseOf, phaseKey, codeOf, startKg, planLine, setProgram: (p) => { P = p; } } };
 })();
