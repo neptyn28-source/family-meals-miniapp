@@ -286,8 +286,8 @@ function renderHub(tab) {
       { icon: "⭐", title: "Отзывы на блюда", text: "Вкус, порция, сытость — учтём в новом меню", run: () => { activeWeekStart = getMonday(new Date()); showFeedback(); } },
     ]],
     ["Новое меню", [
-      { icon: "✨", title: "Создать меню", text: "Готовый запрос для ChatGPT", accent: true, run: weekly(showAiExport) },
-      { icon: "📥", title: "Загрузить меню", text: "Вставить ответ ChatGPT и посчитать покупки", run: showAiImport },
+      { icon: "✨", title: "Создать меню", text: "Готовый запрос для Claude", accent: true, run: weekly(showAiExport) },
+      { icon: "📥", title: "Загрузить меню", text: "Вставить ответ Claude и посчитать покупки", run: showAiImport },
       { icon: "🔄", title: "Заменить блюдо", text: "Ручная замена в меню недели", run: showMealReplacement },
     ]],
   ] : [
@@ -533,7 +533,7 @@ async function showInventory() {
   editingInventoryId = null;
   showPanel(`
     <h2>Остатки</h2>
-    <p>Записывай фактическое состояние продукта. Если остаток нельзя подавать напрямую, отметь «только в готовку» — это попадёт в отчёт для ChatGPT и будет учитываться при расчёте покупок.</p>
+    <p>Записывай фактическое состояние продукта. Если остаток нельзя подавать напрямую, отметь «только в готовку» — это попадёт в отчёт для Claude и будет учитываться при расчёте покупок.</p>
     <div class="form-grid">
       <input id="invName" placeholder="Продукт" style="${inputStyle()}">
       <input id="invQty" type="number" min="0" step="0.01" placeholder="Количество" style="${inputStyle()}">
@@ -693,7 +693,7 @@ async function saveInventoryItem() {
 async function showRules() {
   showPanel(`
     <h2>Правила семьи</h2>
-    <p>Сюда входят аллергии, запреты, нелюбимые продукты и вкусовые предпочтения. Они попадут в отчёт для ChatGPT.</p>
+    <p>Сюда входят аллергии, запреты, нелюбимые продукты и вкусовые предпочтения. Они попадут в отчёт для Claude.</p>
     <div class="form-grid">
       <select id="ruleType" style="${inputStyle()}">
         <option value="hard">Жёсткое правило</option>
@@ -784,7 +784,7 @@ async function addRule() {
 async function showProfile() {
   showPanel(`
     <h2>Вес и цели</h2>
-    <p>Эти данные не определяют меню автоматически. Они уходят в отчёт для ChatGPT, чтобы порции подбирались осмысленно.</p>
+    <p>Эти данные не определяют меню автоматически. Они уходят в отчёт для Claude, чтобы порции подбирались осмысленно.</p>
     <div id="profileStatus">Загружаем…</div>
     <div id="profileForm"></div>
   `);
@@ -955,7 +955,7 @@ async function showAiExport() {
   showPanel(
     weekChooser("export", "Выгрузить в ИИ", "Бот соберёт один готовый промт: остатки, отзывы, правила, вес, цели, бюджет и технический формат для обратной вставки.") +
     `
-      <button id="buildAiPrompt" style="${buttonStyle("width:100%;margin-top:12px")}">Собрать отчёт для ChatGPT</button>
+      <button id="buildAiPrompt" style="${buttonStyle("width:100%;margin-top:12px")}">Собрать отчёт для Claude</button>
       <div id="exportStatus" class="muted" style="margin-top:8px"></div>
       <div id="exportResult"></div>
     `
@@ -980,7 +980,7 @@ async function buildAiPrompt() {
           <button id="copyAiPrompt">Копировать</button>
         </div>
         <textarea id="aiPromptText" rows="18" readonly style="${inputStyle("margin-top:8px;resize:vertical;font-family:ui-monospace,monospace;font-size:12px")}">${escapeHtml(data.prompt)}</textarea>
-        <p class="muted">Скопируй целиком и отправь мне в ChatGPT. Я верну обычное меню + JSON в конце.</p>
+        <p class="muted">Скопируй целиком и отправь Claude. Я верну обычное меню + JSON в конце.</p>
       </div>
     `;
     status.textContent = `Формат меню: ${data.menu_format}`;
@@ -1004,7 +1004,7 @@ async function showAiImport() {
   showPanel(`
     <h2>Вставить меню из ИИ</h2>
     <p>Вставь мой ответ целиком. Бот сам найдёт JSON-блок, проверит 7 дней/35 слотов и только после этого посчитает покупки.</p>
-    <textarea id="aiImportText" rows="18" placeholder="Вставь сюда ответ ChatGPT…" style="${inputStyle("resize:vertical;font-family:ui-monospace,monospace;font-size:12px")}"></textarea>
+    <textarea id="aiImportText" rows="18" placeholder="Вставь сюда ответ Claude…" style="${inputStyle("resize:vertical;font-family:ui-monospace,monospace;font-size:12px")}"></textarea>
     <button id="aiImportBtn" style="${buttonStyle("width:100%;margin-top:10px")}">Импортировать меню и посчитать покупки</button>
     <div id="aiImportStatus" style="margin-top:10px"></div>
   `);
@@ -1016,7 +1016,7 @@ async function importAiMenu() {
   const button = document.querySelector("#aiImportBtn");
   const status = document.querySelector("#aiImportStatus");
   if (!text) {
-    status.textContent = "Сначала вставь ответ ChatGPT.";
+    status.textContent = "Сначала вставь ответ Claude.";
     return;
   }
   button.disabled = true;
@@ -1051,7 +1051,7 @@ budgetStatusText(data.shopping.budget_status))}
 
 async function showWeek() {
   showPanel(
-    weekChooser("menu", "Меню недели", "Это меню, которое ты вставил из ChatGPT. Бот здесь ничего не придумывает.") +
+    weekChooser("menu", "Меню недели", "Это меню, которое ты вставил из Claude. Бот здесь ничего не придумывает.") +
     '<div id="menuStatus" class="muted">Загружаем…</div><div id="menuContent"></div>'
   );
   bindWeekNav("menu", showWeek);
@@ -1060,9 +1060,9 @@ async function showWeek() {
   try {
     const data = await api("week.get", { week_start: isoDate(activeWeekStart) });
     const meals = data.meals || [];
-    status.innerHTML = `${escapeHtml(weekRange(activeWeekStart))} · ${escapeHtml(data.week.ai_import_version ? "импорт из ChatGPT" : "старое меню")} ${data.week.estimated_cost != null ? "· " + escapeHtml(money(data.week.estimated_cost)) : ""}`;
+    status.innerHTML = `${escapeHtml(weekRange(activeWeekStart))} · ${escapeHtml(data.week.ai_import_version ? "импорт из Claude" : "старое меню")} ${data.week.estimated_cost != null ? "· " + escapeHtml(money(data.week.estimated_cost)) : ""}`;
     if (!meals.length) {
-      content.innerHTML = '<p>Меню ещё не импортировано. Используй «Выгрузить в ИИ» → ChatGPT → «Вставить меню из ИИ».</p>';
+      content.innerHTML = '<p>Меню ещё не импортировано. Используй «Выгрузить в ИИ» → Claude → «Вставить меню из ИИ».</p>';
       return;
     }
 
@@ -1158,7 +1158,7 @@ async function showShopping() {
     status.textContent = `${weekRange(activeWeekStart)} · ${weekData.week.estimated_cost != null ? money(weekData.week.estimated_cost) : "стоимость не рассчитана"} · ${weekData.week.budget_status ? budgetStatusText(weekData.week.budget_status) : "—"}`;
 
     if (!items.length) {
-      content.innerHTML = '<p>Список покупок появится после импорта меню из ChatGPT.</p>';
+      content.innerHTML = '<p>Список покупок появится после импорта меню из Claude.</p>';
       return;
     }
 
@@ -1279,7 +1279,7 @@ async function showShopping() {
 // Отзывы на блюда: каждое блюдо недели — один раз, одна оценка от того, кто открыл бот.
 // Блюдо, приготовленное на два дня, не повторяется. Оценка сохраняется сразу по нажатию
 // и пишется на первое появление блюда в неделе (или туда, где уже лежит прежняя оценка) —
-// так ChatGPT видит одну строку на блюдо.
+// так Claude видит одну строку на блюдо.
 const FB_CHOICES = {
   taste: [["liked", "👍", "Вкусно"], ["neutral", "😐", "Нормально"], ["disliked", "👎", "Не понравилось"]],
   portion: [["too_little", "", "Мало"], ["ok", "", "В самый раз"], ["too_much", "", "Много"]],
@@ -1304,7 +1304,7 @@ function shortDay(value) {
 
 async function showFeedback() {
   showPanel(
-    weekChooser("fb", "Отзывы на блюда", "Оцени блюда недели — следующее меню из ChatGPT учтёт твои оценки. Каждое блюдо один раз, сохраняется сразу.") +
+    weekChooser("fb", "Отзывы на блюда", "Оцени блюда недели — следующее меню из Claude учтёт твои оценки. Каждое блюдо один раз, сохраняется сразу.") +
     '<div id="fbStatus" class="muted">Загружаем…</div><div id="fbContent"></div>'
   );
   bindWeekNav("fb", showFeedback);
@@ -1409,7 +1409,7 @@ async function showToday() {
     if (!target.isConnected) return;
     const meals = (data.meals || []).filter((m) => String(m.meal_date).slice(0, 10) === today);
     if (!meals.length) {
-      target.innerHTML = '<div class="card"><h3 style="margin-top:0">На сегодня меню пока нет</h3><p>Создай меню через ChatGPT и загрузи его — здесь появятся блюда дня.</p><button id="todayWeekBtn" style="width:100%">✨ Создать меню</button></div>';
+      target.innerHTML = '<div class="card"><h3 style="margin-top:0">На сегодня меню пока нет</h3><p>Создай меню через Claude и загрузи его — здесь появятся блюда дня.</p><button id="todayWeekBtn" style="width:100%">✨ Создать меню</button></div>';
       document.querySelector("#todayWeekBtn").addEventListener("click", () => openSub("menu", () => { activeWeekStart = defaultPlanningMonday(); showAiExport(); }));
       return;
     }

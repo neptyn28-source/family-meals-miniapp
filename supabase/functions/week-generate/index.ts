@@ -25,7 +25,7 @@ Deno.serve(async (req) => {
     return reply({
       ok: false,
       error: "automatic_generation_disabled",
-      message: "Автоматический генератор отключён. Используй «Выгрузить в ИИ» → ChatGPT → «Вставить меню из ИИ».",
+      message: "Автоматический генератор отключён. Используй «Выгрузить в ИИ» → Claude → «Вставить меню из ИИ».",
     }, 410);
   } catch (error) {
     console.error(error);

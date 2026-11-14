@@ -133,7 +133,7 @@ function cleanPortionComponents(v: unknown, issues: string[], slot: string): Rec
 
 export function extractAiMenuJson(text: string): unknown {
   const source = String(text ?? "").trim();
-  if (!source) throw new AiMenuValidationError(["Вставь JSON меню из ChatGPT."]);
+  if (!source) throw new AiMenuValidationError(["Вставь JSON меню из Claude."]);
 
   const attempts: string[] = [source];
   const fence = source.match(/\x60\x60\x60(?:json)?\s*([\s\S]*?)\x60\x60\x60/i);
@@ -152,7 +152,7 @@ export function extractAiMenuJson(text: string): unknown {
   }
 
   throw new AiMenuValidationError([
-    "Не удалось найти корректный JSON. Вставь ответ ChatGPT целиком или блок FAMILY_MEAL_PLAN_JSON.",
+    "Не удалось найти корректный JSON. Вставь ответ Claude целиком или блок FAMILY_MEAL_PLAN_JSON.",
   ]);
 }
 

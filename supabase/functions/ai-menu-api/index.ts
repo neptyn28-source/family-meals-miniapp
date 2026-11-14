@@ -237,6 +237,25 @@ async function main(req: Request) {
       ]);
       for (const x of [familyR, membersR, rulesR, inventoryR, feedbackR]) if (x.error) throw x.error;
 
+      // Блюда трёх прошлых недель — чтобы ИИ не повторял одно и то же.
+      const from = new Date(weekStart + "T12:00:00Z");
+      from.setUTCDate(from.getUTCDate() - 21);
+      const pastWeeksR = await db.from("weekly_plans").select("id,week_start")
+        .eq("family_id", familyId).gte("week_start", from.toISOString().slice(0, 10)).lt("week_start", weekStart);
+      if (pastWeeksR.error) throw pastWeeksR.error;
+      const weekById = new Map((pastWeeksR.data ?? []).map((w: any) => [String(w.id), String(w.week_start)]));
+      let recentDishes: { week_start: string; title: string; meal_types: string[] }[] = [];
+      if (weekById.size) {
+        const blocksR = await db.from("ai_menu_cook_blocks").select("week_id,title,serves")
+          .eq("family_id", familyId).in("week_id", [...weekById.keys()]);
+        if (blocksR.error) throw blocksR.error;
+        recentDishes = (blocksR.data ?? []).map((b: any) => ({
+          week_start: weekById.get(String(b.week_id)) ?? "",
+          title: String(b.title ?? "").trim(),
+          meal_types: Array.isArray(b.serves) ? b.serves.map((s: any) => String(s?.meal_type ?? "")) : [],
+        })).filter((d) => d.title);
+      }
+
       const prompt = buildExportPrompt({
         weekStart,
         family: familyR.data,
@@ -246,11 +265,12 @@ async function main(req: Request) {
         rules: rulesR.data ?? [],
         inventory: inventoryR.data ?? [],
         feedback: feedbackR.data ?? [],
+        recentDishes,
       });
 
       return reply({
         ok: true,
-        prompt_version: "ai-menu-prompt-v2",
+        prompt_version: "ai-menu-prompt-v3",
         menu_format: AI_MENU_FORMAT,
         prompt,
       });
@@ -417,7 +437,7 @@ async function main(req: Request) {
         planner_version: null,
         ai_import_version: AI_MENU_FORMAT,
         imported_at: new Date().toISOString(),
-        notes: plan.summary || "Меню импортировано из ChatGPT. Покупки рассчитаны ботом.",
+        notes: plan.summary || "Меню импортировано из Claude. Покупки рассчитаны ботом.",
         updated_at: new Date().toISOString(),
       }).eq("id", weekId).eq("family_id", familyId).select("*").single();
       if (weekUpdate.error) throw weekUpdate.error;
